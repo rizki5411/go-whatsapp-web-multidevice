@@ -160,6 +160,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	// registered outside DeviceMiddleware like the Chatwoot config routes.
 	rest.InitRestCommandConfig(apiGroup, dm, chatStorageRepo)
 	rest.InitRestMessageQueue(apiGroup, dm, messageQueueRepo)
+	rest.InitRestCustomUI(apiGroup)
 
 	// MCP endpoint — same usecase instances as REST, so both surfaces share
 	// one whatsmeow session. With OAuth disabled it keeps the existing global

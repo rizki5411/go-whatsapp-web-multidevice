@@ -28,12 +28,10 @@ type CommandConfigHandler struct {
 // InitRestCommandConfig registers the command config routes. They take the
 // device as a path param and resolve it manually, so they must be registered
 // outside DeviceMiddleware (which only reads header/query).
+//
+// The operator console itself lives at /custom/command; see custom_ui.go.
 func InitRestCommandConfig(app fiber.Router, dm *whatsapp.DeviceManager, chatStorageRepo domainChatStorage.IChatStorageRepository) *CommandConfigHandler {
 	h := &CommandConfigHandler{DeviceManager: dm, ChatStorageRepo: chatStorageRepo}
-
-	// Operator console for this feature. The main dashboard (gowa-ui) is a
-	// separate project, so its released HTML knows nothing about these routes.
-	app.Get("/command/ui", h.CommandUI)
 
 	app.Get("/command/commands", h.ListCommands)
 	app.Get("/command/configs", h.ListCommandConfigs)

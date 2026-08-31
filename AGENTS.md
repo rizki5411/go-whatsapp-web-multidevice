@@ -45,7 +45,8 @@ go-whatsapp-web-multidevice/
 | Add REST endpoint | `src/ui/rest/`, `src/usecase/`, `src/domains/` | Handler parses request, usecase validates/executes, domain owns DTO/interface. |
 | Add MCP tool | `src/ui/mcp/` | Register in `Add*Tools`; resolve a device with `resolveDeviceContext` (`src/ui/mcp/device.go`). |
 | Handle WhatsApp event | `src/infrastructure/whatsapp/event_*.go` | Register the concrete event in `event_handler.go`. |
-| Add inbound chat command | `src/infrastructure/whatsapp/event_command_handler.go`, `src/ui/rest/command_config.go` | Register in `commandRegistry`; per-device targets and permissions live in `device_command_config`. Operator page: `src/ui/rest/assets/command_ui.html` at `/command/ui`. |
+| Add inbound chat command | `src/infrastructure/whatsapp/event_command_handler.go`, `src/ui/rest/command_config.go` | Register in `commandRegistry`; per-device targets and permissions live in `device_command_config`. Operator page: `/custom/command`. |
+| Add an operator console | `src/ui/rest/custom_ui.go`, `src/ui/rest/assets/` | Embed the HTML and register it as `/custom/<name>` in `InitRestCustomUI`. Pages must be self-contained (no CDN) and derive the API root by stripping their own path. |
 | Presence behavior | `src/infrastructure/whatsapp/event_handler.go`, `presence_pulse.go`, `src/cmd/helpers.go` | Connect-time and scheduled pulse presence. |
 | Add chat storage method | `src/domains/chatstorage/interfaces.go`, `sqlite_repository.go`, `chatstorage_wrapper.go` | Update domain, repository, and wrapper together. |
 | Add DB migration | `src/infrastructure/chatstorage/sqlite_repository.go` `getMigrations()` | Append only, one statement per entry. Current list has 52 migrations. |
@@ -115,7 +116,7 @@ go-whatsapp-web-multidevice/
 - The app uses mutable package globals for config, clients, repositories, and usecases instead of dependency injection from `main`.
 - MCP exposes 5 consolidated tools (`src/ui/mcp/`) — `whatsapp_send`, `whatsapp_message`, `whatsapp_chat`, `whatsapp_group`, `whatsapp_app` — each dispatching on a `type`/`action` argument, versus one REST route per operation.
 - Chat storage migrations are Go string literals in the repository, not external migration files.
-- There is no embedded Vue UI any more (`src/views/` is gone). The dashboard at `/` is `gowa-ui.html`, a separate project downloaded at runtime into `storages/ui` and auto-updated, so fork-specific settings pages must be embedded by this repo instead (see `src/ui/rest/command_ui.go`).
+- There is no embedded Vue UI any more (`src/views/` is gone). The dashboard at `/` is `gowa-ui.html`, a separate project downloaded at runtime into `storages/ui` and auto-updated, so editing it is pointless; fork-specific pages are embedded by this repo instead and served under `/custom` (see `src/ui/rest/custom_ui.go`).
 - Release workflows generate GoReleaser YAML into `/tmp`; there is no committed `.goreleaser.yml`.
 - `AppVersion` is hard-coded as `v8.6.0` in `src/config/settings.go`; release workflows do not inject it with ldflags.
 - `src/pkg/error` declares package name `error`; import it with aliases such as `pkgError`.

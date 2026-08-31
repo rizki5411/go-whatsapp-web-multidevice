@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Konsol Custom</title>
+<style>
+  :root {
+    --paper:   #eef1f4;
+    --surface: #ffffff;
+    --sunken:  #f7f9fa;
+    --ink:     #16202b;
+    --muted:   #5e6c7a;
+    --line:    #d3dae1;
+    --line-strong: #b6c1cb;
+    --signal:  #b5540a;
+    --signal-soft: #fdf0e4;
+    --live:    #0f7b6c;
+    --danger:  #a32020;
+    --focus:   #1c6fd0;
+
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:   #10161d;
+      --surface: #18212b;
+      --sunken:  #131b23;
+      --ink:     #e6ecf2;
+      --muted:   #93a2b1;
+      --line:    #2b3945;
+      --line-strong: #3d4e5d;
+      --signal:  #f0a05a;
+      --signal-soft: #2e2013;
+      --live:    #4fc0ac;
+      --danger:  #e88080;
+      --focus:   #6aa9f0;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+
+  h1 { font-size: 27px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 62ch; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  .cards { display: grid; gap: 14px; }
+
+  a.card {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px 22px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color .12s, transform .12s;
+  }
+  a.card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+  a.card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  a.card h2 {
+    font-size: 17px; font-weight: 620; margin: 0 0 5px;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  a.card .path { font-family: var(--mono); font-size: 12px; color: var(--muted); font-weight: 400; }
+  a.card p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .note {
+    margin-top: 30px;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--signal);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-size: 13.5px;
+    color: var(--muted);
+  }
+  .note b { color: var(--ink); font-weight: 620; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Konsol internal</p>
+  <h1>Halaman custom</h1>
+  <p class="lede">
+    Halaman operator untuk fitur yang hanya ada di fork ini. Dashboard utama datang dari
+    proyek terpisah dan ditimpa setiap auto-update, jadi halaman-halaman ini ikut di dalam binary.
+  </p>
+
+  <div class="cards">
+    <a class="card" href="custom/command">
+      <h2>Command routing <span class="path">/custom/command</span></h2>
+      <p>Atur grup tujuan <code>!forward</code> dan siapa saja yang boleh menjalankan command per device.</p>
+    </a>
+
+    <a class="card" href="custom/queue">
+      <h2>Antrian pengiriman <span class="path">/custom/queue</span></h2>
+      <p>Lihat dan kelola antrian pesan per device: yang menunggu, terkirim, gagal, dan batalkan yang belum jalan.</p>
+    </a>
+  </div>
+
+  <p class="note">
+    <b>Menambah halaman baru:</b> taruh HTML-nya di <code>src/ui/rest/assets/</code>,
+    embed di <code>custom_ui.go</code>, lalu daftarkan sebagai <code>/custom/&lt;nama&gt;</code>
+    di <code>InitRestCustomUI</code>.
+  </p>
+</div>
+</body>
+</html>

@@ -32,7 +32,13 @@ balik ke upstream. Fork ini akan terus sync perubahan dari upstream secara berka
       `src/domains/messagequeue/`, repo `sqlite_repository_message_queue.go`
       (tabel `message_queue`, migration 50-52), worker
       `src/infrastructure/whatsapp/message_queue_worker.go`, enqueue/dispatch
-      `src/usecase/send_queue.go`, API `src/ui/rest/message_queue.go`
+      `src/usecase/send_queue.go`, API `src/ui/rest/message_queue.go`,
+      UI operator `/custom/queue`
+- [x] Halaman operator custom di bawah `/custom` (`src/ui/rest/custom_ui.go`) —
+      `/custom/command` dan `/custom/queue`. Dashboard utama (gowa-ui) cuma cache
+      yang ditimpa auto-update, jadi halaman fork WAJIB di-embed di sini.
+      Tambah halaman baru: taruh HTML di `src/ui/rest/assets/`, embed, daftarkan
+      di `InitRestCustomUI`.
 
 ## Pola yang WAJIB diikuti untuk fitur baru
 - Config per-device yang perlu disimpan & diatur lewat API: ikuti pola

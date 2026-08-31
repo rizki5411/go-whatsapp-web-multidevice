@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Antrian Pengiriman</title>
+<style>
+  :root {
+    --paper:   #eef1f4;
+    --surface: #ffffff;
+    --sunken:  #f7f9fa;
+    --ink:     #16202b;
+    --muted:   #5e6c7a;
+    --line:    #d3dae1;
+    --line-strong: #b6c1cb;
+    --signal:  #b5540a;
+    --signal-soft: #fdf0e4;
+    --live:    #0f7b6c;
+    --live-soft: #e4f4f1;
+    --danger:  #a32020;
+    --danger-soft: #fbeaea;
+    --focus:   #1c6fd0;
+
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:   #10161d;
+      --surface: #18212b;
+      --sunken:  #131b23;
+      --ink:     #e6ecf2;
+      --muted:   #93a2b1;
+      --line:    #2b3945;
+      --line-strong: #3d4e5d;
+      --signal:  #f0a05a;
+      --signal-soft: #2e2013;
+      --live:    #4fc0ac;
+      --live-soft: #16302b;
+      --danger:  #e88080;
+      --danger-soft: #331b1b;
+      --focus:   #6aa9f0;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 100px; }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+  .eyebrow a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+  .eyebrow a:hover { color: var(--ink); }
+
+  h1 { font-size: 27px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 66ch; }
+
+  .jid { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  /* --- control bar --- */
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 220px; flex: 1; }
+  .field label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  select, input[type=text] {
+    font: inherit; font-size: 14px;
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: 6px;
+    padding: 8px 10px;
+  }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  .state {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 5px 9px; border-radius: 4px; white-space: nowrap;
+    background: var(--live-soft); color: var(--live);
+  }
+  .state.off { background: var(--sunken); color: var(--muted); }
+
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); white-space: nowrap; }
+  .toggle input { width: 15px; height: 15px; accent-color: var(--signal); }
+
+  /* --- signature: queue meter --- */
+  .meter {
+    display: flex; align-items: stretch; gap: 0;
+    margin: 18px 0 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .meter .cell {
+    flex: 1; padding: 16px 18px;
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .meter .cell:last-child { border-right: 0; }
+  .meter .n { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .meter .k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .meter .cell.hot { background: var(--signal-soft); }
+  .meter .cell.hot .n { color: var(--signal); }
+  .meter .cell.bad .n { color: var(--danger); }
+  .meter .cell.good .n { color: var(--live); }
+  .meter .cell.zero .n { color: var(--muted); }
+
+  /* --- table --- */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .panel > header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .panel h2 { font-size: 14px; font-weight: 620; margin: 0; }
+  .panel .hint { font-size: 12.5px; color: var(--muted); margin: 0; }
+
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th {
+    text-align: left; font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+    background: var(--sunken); white-space: nowrap;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.when small { display: block; color: var(--muted); font-size: 11.5px; }
+  td.act { text-align: right; white-space: nowrap; }
+
+  .tag {
+    display: inline-block;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 4px; white-space: nowrap;
+  }
+  .tag.pending   { background: var(--signal-soft); color: var(--signal); }
+  .tag.sending   { background: var(--signal-soft); color: var(--signal); }
+  .tag.sent      { background: var(--live-soft);   color: var(--live); }
+  .tag.failed    { background: var(--danger-soft); color: var(--danger); }
+  .tag.cancelled { background: var(--sunken);      color: var(--muted); }
+
+  .type { font-size: 12.5px; color: var(--muted); }
+  .type b { color: var(--ink); font-weight: 600; font-size: 13.5px; display: block; }
+  .clip { display: inline-block; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  .err { color: var(--danger); font-size: 12.5px; }
+
+  button {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  }
+  button:hover:not(:disabled) { border-color: var(--ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.danger { color: var(--danger); border-color: var(--danger); }
+  button.danger:hover:not(:disabled) { background: var(--danger-soft); }
+  button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  .empty { padding: 34px 18px; text-align: center; color: var(--muted); font-size: 13.5px; }
+  .empty b { display: block; color: var(--ink); font-weight: 620; margin-bottom: 3px; font-size: 14.5px; }
+
+  .msg { font-size: 13px; min-height: 18px; margin: 14px 0 0; color: var(--muted); }
+  .msg.ok { color: var(--live); }
+  .msg.bad { color: var(--danger); }
+
+  .foot { margin-top: 26px; font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow"><a href="../custom">Konsol custom</a> &nbsp;/&nbsp; Antrian</p>
+  <h1>Antrian pengiriman per device</h1>
+  <p class="lede">
+    Pesan yang dikirim dengan <code>queue: true</code> ditahan di sini dan dikirim satu per satu
+    dengan jeda acak, supaya nomor tidak terlihat mengirim beruntun. Tiap device punya antrian sendiri.
+  </p>
+
+  <div class="bar">
+    <div class="field">
+      <label for="dev">Device</label>
+      <select id="dev"><option value="">Memuat…</option></select>
+    </div>
+    <div class="field" style="max-width:200px">
+      <label for="status">Status</label>
+      <select id="status">
+        <option value="">Semua</option>
+        <option value="pending">Menunggu</option>
+        <option value="sending">Sedang dikirim</option>
+        <option value="sent">Terkirim</option>
+        <option value="failed">Gagal</option>
+        <option value="cancelled">Dibatalkan</option>
+      </select>
+    </div>
+    <div class="state off" id="devstate"></div>
+    <label class="toggle" for="auto">
+      <input type="checkbox" id="auto" checked>
+      Segarkan otomatis
+    </label>
+  </div>
+
+  <div class="meter" id="meter" hidden></div>
+
+  <section class="panel">
+    <header>
+      <h2>Isi antrian</h2>
+      <p class="hint" id="hint">Urut dari yang paling lama menunggu.</p>
+    </header>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Jenis</th>
+            <th>Tujuan</th>
+            <th>Status</th>
+            <th>Masuk antrian</th>
+            <th>Terkirim</th>
+            <th>Keterangan</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty">Pilih device dulu.</div>
+  </section>
+
+  <p class="msg" id="msg"></p>
+
+  <p class="foot">
+    Hanya baris <b>Menunggu</b> yang bisa dibatalkan. Yang sudah diambil worker, terkirim, atau gagal
+    tidak bisa ditarik lagi. Kegagalan tidak dicoba ulang — antrian lanjut ke baris berikutnya.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Served at {basePath}/custom/queue, so strip that suffix to get the API root.
+  // Keeps working when APP_BASE_PATH is set.
+  var API = window.location.pathname.replace(/\/custom\/queue\/?$/, "");
+
+  var REFRESH_MS = 5000;
+
+  var el = function (id) { return document.getElementById(id); };
+  var devSel = el("dev"), statusSel = el("status"), devState = el("devstate"), auto = el("auto");
+  var meter = el("meter"), rows = el("rows"), empty = el("empty"), hint = el("hint"), msg = el("msg");
+
+  var state = { device: null, devices: [], rows: [], counts: {}, busy: false };
+  var timer = null;
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    opts.headers = Object.assign({ "Accept": "application/json" }, opts.headers || {});
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        return { status: r.status, body: body };
+      });
+    });
+  }
+
+  function say(text, kind) {
+    msg.textContent = text || "";
+    msg.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // --- formatting ----------------------------------------------------------
+
+  var STATUS_LABEL = {
+    pending: "Menunggu", sending: "Dikirim", sent: "Terkirim",
+    failed: "Gagal", cancelled: "Dibatalkan"
+  };
+
+  var TYPE_LABEL = {
+    text: "Teks", image: "Gambar", file: "Dokumen",
+    video: "Video", audio: "Audio", sticker: "Stiker"
+  };
+
+  function clock(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  // Relative time is what an operator actually reads: "3 menit lalu" answers
+  // "is this stuck?" faster than a timestamp does.
+  function ago(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var s = Math.round((Date.now() - d.getTime()) / 1000);
+    if (s < 0) s = 0;
+    if (s < 45) return s + " detik lalu";
+    var m = Math.round(s / 60);
+    if (m < 60) return m + " menit lalu";
+    var h = Math.round(m / 60);
+    if (h < 24) return h + " jam lalu";
+    return Math.round(h / 24) + " hari lalu";
+  }
+
+  function phoneShort(jid) {
+    return String(jid || "").replace(/@s\.whatsapp\.net$/, "").replace(/@g\.us$/, " (grup)");
+  }
+
+  // --- rendering -----------------------------------------------------------
+
+  var METER_CELLS = [
+    { key: "pending",   label: "Menunggu",   cls: "hot" },
+    { key: "sending",   label: "Dikirim",    cls: "hot" },
+    { key: "sent",      label: "Terkirim",   cls: "good" },
+    { key: "failed",    label: "Gagal",      cls: "bad" },
+    { key: "cancelled", label: "Dibatalkan", cls: "" }
+  ];
+
+  function renderMeter() {
+    if (!state.device) { meter.hidden = true; return; }
+    meter.hidden = false;
+    meter.innerHTML = METER_CELLS.map(function (c) {
+      var n = state.counts[c.key] || 0;
+      var cls = "cell " + (n === 0 ? "zero" : c.cls);
+      return '<div class="' + cls + '"><span class="n">' + n + '</span>' +
+             '<span class="k">' + c.label + "</span></div>";
+    }).join("");
+  }
+
+  function renderRows() {
+    if (!state.device) {
+      rows.innerHTML = "";
+      empty.hidden = false;
+      empty.innerHTML = "Pilih device dulu.";
+      return;
+    }
+
+    if (!state.rows.length) {
+      rows.innerHTML = "";
+      empty.hidden = false;
+      empty.innerHTML = statusSel.value
+        ? "<b>Tidak ada baris berstatus " + esc(STATUS_LABEL[statusSel.value] || statusSel.value) + ".</b>Coba ganti filter statusnya."
+        : "<b>Antrian kosong.</b>Kirim pesan dengan <code>queue: true</code> supaya masuk ke sini.";
+      return;
+    }
+
+    empty.hidden = true;
+    rows.innerHTML = state.rows.map(function (m) {
+      var canCancel = m.status === "pending";
+
+      var note = "";
+      if (m.last_error) {
+        note = '<span class="err clip" title="' + esc(m.last_error) + '">' + esc(m.last_error) + "</span>";
+      } else if (m.message_id) {
+        note = '<span class="jid">' + esc(m.message_id) + "</span>";
+      } else if (m.status === "pending") {
+        note = '<span class="type">menunggu jeda</span>';
+      }
+
+      var type = "<b>" + esc(TYPE_LABEL[m.message_type] || m.message_type) + "</b>" +
+                 (m.has_media ? '<span class="type">ada lampiran</span>' : "");
+
+      return "<tr>" +
+        '<td class="num">' + esc(m.id) + "</td>" +
+        '<td class="type">' + type + "</td>" +
+        '<td class="jid">' + esc(phoneShort(m.phone)) + "</td>" +
+        "<td><span class=\"tag " + esc(m.status) + '">' + esc(STATUS_LABEL[m.status] || m.status) + "</span></td>" +
+        '<td class="when">' + clock(m.created_at) + "<small>" + esc(ago(m.created_at)) + "</small></td>" +
+        '<td class="when">' + (m.sent_at ? clock(m.sent_at) + "<small>" + esc(ago(m.sent_at)) + "</small>" : "<span class=\"type\">—</span>") + "</td>" +
+        "<td>" + note + "</td>" +
+        '<td class="act">' +
+          (canCancel
+            ? '<button class="danger" data-cancel="' + esc(m.id) + '">Batalkan</button>'
+            : "") +
+        "</td>" +
+      "</tr>";
+    }).join("");
+  }
+
+  function renderDeviceState() {
+    var d = state.devices.filter(function (x) { return x.id === state.device; })[0];
+    if (!d) { devState.textContent = ""; devState.className = "state off"; return; }
+    var live = d.state === "logged_in";
+    devState.textContent = live ? "terhubung" : (d.state || "tidak aktif").replace(/_/g, " ");
+    devState.className = "state" + (live ? "" : " off");
+    hint.textContent = live
+      ? "Urut dari yang paling lama menunggu."
+      : "Device ini tidak terhubung, jadi antriannya ditahan sampai device aktif lagi.";
+  }
+
+  // --- loading -------------------------------------------------------------
+
+  function loadDevices() {
+    return api("/devices").then(function (res) {
+      var list = (res.body && res.body.results) || [];
+      state.devices = list;
+      if (!list.length) {
+        devSel.innerHTML = '<option value="">Belum ada device</option>';
+        say("Belum ada device. Buat dan pair device dulu di dashboard.", "bad");
+        return;
+      }
+      devSel.innerHTML = list.map(function (d) {
+        var name = d.display_name || d.id;
+        var num = d.jid ? " — " + phoneShort(d.jid) : "";
+        return '<option value="' + esc(d.id) + '">' + esc(name) + esc(num) + "</option>";
+      }).join("");
+
+      // Keep the operator's selection across refreshes.
+      if (state.device && list.some(function (d) { return d.id === state.device; })) {
+        devSel.value = state.device;
+      } else {
+        state.device = list[0].id;
+        devSel.value = state.device;
+      }
+    });
+  }
+
+  function loadQueue() {
+    if (!state.device) { renderMeter(); renderRows(); return Promise.resolve(); }
+    var q = "?limit=200";
+    if (statusSel.value) q += "&status=" + encodeURIComponent(statusSel.value);
+    return api("/devices/" + encodeURIComponent(state.device) + "/queue" + q).then(function (res) {
+      if (res.status !== 200) {
+        say((res.body && res.body.message) || "Gagal memuat antrian.", "bad");
+        return;
+      }
+      var r = res.body.results || {};
+      state.rows = r.messages || [];
+      state.counts = r.counts || {};
+      renderMeter();
+      renderRows();
+      renderDeviceState();
+    });
+  }
+
+  function refresh() {
+    if (state.busy) return Promise.resolve();
+    state.busy = true;
+    return loadDevices().then(loadQueue).catch(function (e) {
+      say("Tidak bisa menghubungi server: " + e, "bad");
+    }).then(function () { state.busy = false; });
+  }
+
+  // --- actions -------------------------------------------------------------
+
+  function cancel(id) {
+    var row = state.rows.filter(function (m) { return String(m.id) === String(id); })[0];
+    var target = row ? phoneShort(row.phone) : ("baris " + id);
+    if (!window.confirm("Batalkan pesan ke " + target + "? Pesan ini tidak akan dikirim.")) return;
+
+    say("Membatalkan…");
+    api("/devices/" + encodeURIComponent(state.device) + "/queue/" + encodeURIComponent(id), {
+      method: "DELETE"
+    }).then(function (res) {
+      if (res.status === 200) {
+        say("Baris " + id + " dibatalkan.", "ok");
+      } else if (res.status === 409) {
+        // The worker picked it up between the render and the click.
+        say("Terlambat — baris " + id + " sudah diproses worker.", "bad");
+      } else {
+        say((res.body && res.body.message) || "Gagal membatalkan.", "bad");
+      }
+      return loadQueue();
+    }).catch(function (e) {
+      say("Gagal membatalkan: " + e, "bad");
+    });
+  }
+
+  // --- wiring --------------------------------------------------------------
+
+  rows.addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-cancel]");
+    if (btn) cancel(btn.getAttribute("data-cancel"));
+  });
+
+  devSel.addEventListener("change", function () {
+    state.device = devSel.value;
+    state.rows = []; state.counts = {};
+    say("");
+    renderDeviceState();
+    loadQueue();
+  });
+
+  statusSel.addEventListener("change", function () { say(""); loadQueue(); });
+
+  function schedule() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (auto.checked) timer = setInterval(loadQueue, REFRESH_MS);
+  }
+  auto.addEventListener("change", schedule);
+
+  // Polling while the tab is hidden is wasted work on a self-hosted box.
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      if (timer) { clearInterval(timer); timer = null; }
+    } else {
+      loadQueue();
+      schedule();
+    }
+  });
+
+  refresh().then(schedule);
+})();
+</script>
+</body>
+</html>

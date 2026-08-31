@@ -344,9 +344,9 @@
 (function () {
   "use strict";
 
-  // The console is served at {basePath}/command/ui, so strip that suffix to get
-  // the API root. Keeps working when APP_BASE_PATH is set.
-  var API = window.location.pathname.replace(/\/command\/ui\/?$/, "");
+  // Served at {basePath}/custom/command, so strip that suffix to get the API
+  // root. Keeps working when APP_BASE_PATH is set.
+  var API = window.location.pathname.replace(/\/custom\/command\/?$/, "");
 
   var el = function (id) { return document.getElementById(id); };
   var devSel = el("dev"), devState = el("devstate"), devNode = el("devnode");

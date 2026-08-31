@@ -26,7 +26,7 @@ ui/
 | Send transport fields | `rest/send.go`, `mcp/send.go` | REST receives full send DTOs; MCP send is a smaller tool subset with manual args. |
 | Chatwoot webhook | `rest/chatwoot.go` | Public route, optional shared secret, echo suppression, read/delete sync. |
 | Chat command config | `rest/command_config.go` | Per-device `!` command targets and sender whitelist; `:device_id` path param. |
-| Chat command console | `rest/command_ui.go`, `rest/assets/command_ui.html` | Embedded operator page at `/command/ui`; gowa-ui cannot host it. |
+| Operator consoles | `rest/custom_ui.go`, `rest/assets/*.html` | Embedded fork-only pages under `/custom`: `/custom/command`, `/custom/queue`. gowa-ui cannot host them. `/command/ui` 301s to `/custom/command`. |
 | Websocket changes | `websocket/websocket.go`, `../views/index.html` | Browser connects with `?device_id=`. |
 
 ## CONVENTIONS
