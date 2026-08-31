@@ -1249,6 +1249,16 @@ paths:
                   description: |
                     List of phone numbers to mention (ghost mentions - no @ required in message text).
                     Use special keyword "@everyone" to mention all group participants.
+                queue:
+                  type: boolean
+                  example: false
+                  description: |
+                    Opt-in. When true the message is persisted to this device's send
+                    queue instead of being delivered now, and the response returns
+                    status "queued" with a queue_id rather than a message_id. Queued
+                    messages go out one at a time per device with a random 2-5 minute
+                    gap, to avoid the account being blocked for sending too fast.
+                    Absent or false keeps the immediate-send behavior unchanged.
       responses:
         '200':
           description: OK
@@ -1322,6 +1332,16 @@ paths:
                   type: boolean
                   example: false
                   description: Whether this is a forwarded message
+                queue:
+                  type: boolean
+                  example: false
+                  description: |
+                    Opt-in. When true the message is persisted to this device's send
+                    queue instead of being delivered now, and the response returns
+                    status "queued" with a queue_id rather than a message_id. Queued
+                    messages go out one at a time per device with a random 2-5 minute
+                    gap, to avoid the account being blocked for sending too fast.
+                    Absent or false keeps the immediate-send behavior unchanged.
       responses:
         '200':
           description: OK
@@ -1383,6 +1403,16 @@ paths:
                   type: integer
                   example: 86400
                   description: "Disappearing message duration in seconds. Allowed values: 0 (no expiry), 86400 (24h), 604800 (7d), 7776000 (90d)."
+                queue:
+                  type: boolean
+                  example: false
+                  description: |
+                    Opt-in. When true the message is persisted to this device's send
+                    queue instead of being delivered now, and the response returns
+                    status "queued" with a queue_id rather than a message_id. Queued
+                    messages go out one at a time per device with a random 2-5 minute
+                    gap, to avoid the account being blocked for sending too fast.
+                    Absent or false keeps the immediate-send behavior unchanged.
       responses:
         '200':
           description: OK
@@ -1444,6 +1474,16 @@ paths:
                   type: integer
                   example: 86400
                   description: "Disappearing message duration in seconds. Allowed values: 0 (no expiry), 86400 (24h), 604800 (7d), 7776000 (90d)."
+                queue:
+                  type: boolean
+                  example: false
+                  description: |
+                    Opt-in. When true the message is persisted to this device's send
+                    queue instead of being delivered now, and the response returns
+                    status "queued" with a queue_id rather than a message_id. Queued
+                    messages go out one at a time per device with a random 2-5 minute
+                    gap, to avoid the account being blocked for sending too fast.
+                    Absent or false keeps the immediate-send behavior unchanged.
       responses:
         '200':
           description: OK
@@ -1498,6 +1538,16 @@ paths:
                   type: boolean
                   example: false
                   description: Whether this is a forwarded sticker
+                queue:
+                  type: boolean
+                  example: false
+                  description: |
+                    Opt-in. When true the message is persisted to this device's send
+                    queue instead of being delivered now, and the response returns
+                    status "queued" with a queue_id rather than a message_id. Queued
+                    messages go out one at a time per device with a random 2-5 minute
+                    gap, to avoid the account being blocked for sending too fast.
+                    Absent or false keeps the immediate-send behavior unchanged.
       responses:
         '200':
           description: OK
@@ -1575,6 +1625,16 @@ paths:
                   type: boolean
                   example: false
                   description: Whether this is a forwarded message
+                queue:
+                  type: boolean
+                  example: false
+                  description: |
+                    Opt-in. When true the message is persisted to this device's send
+                    queue instead of being delivered now, and the response returns
+                    status "queued" with a queue_id rather than a message_id. Queued
+                    messages go out one at a time per device with a random 2-5 minute
+                    gap, to avoid the account being blocked for sending too fast.
+                    Absent or false keeps the immediate-send behavior unchanged.
       responses:
         '200':
           description: OK
@@ -4027,6 +4087,126 @@ paths:
                         type: string
                         example: 'my-device-id'
 
+  /devices/{device_id}/queue:
+    get:
+      operationId: listDeviceMessageQueue
+      tags:
+        - message queue
+      summary: List a device's send queue
+      description: |
+        Returns the rows in this device's outbound send queue, oldest first, plus a
+        count per status. Each device has its own independent queue.
+      parameters:
+        - $ref: '#/components/parameters/MessageQueueDeviceId'
+        - name: status
+          in: query
+          required: false
+          description: Filter by status. Omit for all statuses.
+          schema:
+            type: string
+            enum: [pending, sending, sent, failed, cancelled]
+        - name: limit
+          in: query
+          required: false
+          description: Maximum rows to return (default 100, capped at 1000).
+          schema:
+            type: integer
+            example: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: SUCCESS
+                  message:
+                    type: string
+                    example: Device message queue
+                  results:
+                    type: object
+                    properties:
+                      device_id:
+                        type: string
+                        example: 'my-device-id'
+                      counts:
+                        type: object
+                        additionalProperties:
+                          type: integer
+                        example: {pending: 3, sent: 12, failed: 1}
+                      messages:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/QueuedMessage'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBadRequest'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBadRequest'
+  /devices/{device_id}/queue/{queue_id}:
+    delete:
+      operationId: cancelDeviceQueuedMessage
+      tags:
+        - message queue
+      summary: Cancel a queued message
+      description: |
+        Cancels a message that has not been picked up for sending yet and deletes any
+        media it was holding. Returns 409 if the row has already moved past pending.
+      parameters:
+        - $ref: '#/components/parameters/MessageQueueDeviceId'
+        - name: queue_id
+          in: path
+          required: true
+          description: Queue row id, as returned by a queued send or the listing.
+          schema:
+            type: integer
+            format: int64
+            example: 42
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: SUCCESS
+                  message:
+                    type: string
+                    example: Queued message cancelled
+                  results:
+                    $ref: '#/components/schemas/QueuedMessage'
+        '404':
+          description: No queued message with that id for this device
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBadRequest'
+        '409':
+          description: The message is no longer pending
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBadRequest'
+
 components:
   parameters:
     DeviceIdHeader:
@@ -4045,6 +4225,15 @@ components:
       in: path
       required: true
       description: Device ID (or WhatsApp JID) whose Chatwoot config is addressed
+      schema:
+        type: string
+        example: 'my-device-id'
+
+    MessageQueueDeviceId:
+      name: device_id
+      in: path
+      required: true
+      description: Device ID (or WhatsApp JID) whose send queue is addressed
       schema:
         type: string
         example: 'my-device-id'
@@ -4476,6 +4665,51 @@ components:
             read_receipts:
               type: string
               example: all
+    QueuedMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 42
+        device_id:
+          type: string
+          example: 'my-device-id'
+        message_type:
+          type: string
+          enum: [text, image, file, video, audio, sticker]
+          example: text
+        phone:
+          type: string
+          example: '6289685028129@s.whatsapp.net'
+        status:
+          type: string
+          enum: [pending, sending, sent, failed, cancelled]
+          example: pending
+        scheduled_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sent_at:
+          type: string
+          format: date-time
+          description: Only present once the message was sent.
+        message_id:
+          type: string
+          example: '3EB0B430B6F8F1D0E053AC120E0A9E5C'
+          description: WhatsApp message id, only present once sent.
+        last_error:
+          type: string
+          description: Only present when the send failed.
+        has_media:
+          type: boolean
+          description: Only present when the row holds an uploaded file.
+
     SendResponse:
       type: object
       properties:
@@ -4491,9 +4725,18 @@ components:
             message_id:
               type: string
               example: '3EB0B430B6F8F1D0E053AC120E0A9E5C'
+              description: Empty when the message was queued rather than sent.
             status:
               type: string
               example: '<feature> success ....'
+              description: '"queued" when the message entered the send queue.'
+            queue_id:
+              type: integer
+              format: int64
+              example: 42
+              description: |
+                Only present when status is "queued". Identifies the queue row, and
+                can be used with the device queue endpoints to inspect or cancel it.
     DeviceResponse:
       type: object
       properties:

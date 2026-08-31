@@ -21,6 +21,7 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
 	domainChatStorage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
+	domainMessageQueue "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/messagequeue"
 	domainSend "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/send"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
@@ -170,12 +171,21 @@ func getVideoMetadata(videoPath string) videoMetadata {
 type serviceSend struct {
 	appService      app.IAppUsecase
 	chatStorageRepo domainChatStorage.IChatStorageRepository
+	// messageQueueRepo backs the opt-in `queue: true` path. Nil is tolerated:
+	// queued requests then fail with a clear error instead of panicking, and the
+	// direct send path never touches it. See send_queue.go.
+	messageQueueRepo domainMessageQueue.IMessageQueueRepository
 }
 
-func NewSendService(appService app.IAppUsecase, chatStorageRepo domainChatStorage.IChatStorageRepository) domainSend.ISendUsecase {
+func NewSendService(
+	appService app.IAppUsecase,
+	chatStorageRepo domainChatStorage.IChatStorageRepository,
+	messageQueueRepo domainMessageQueue.IMessageQueueRepository,
+) domainSend.ISendUsecase {
 	return &serviceSend{
-		appService:      appService,
-		chatStorageRepo: chatStorageRepo,
+		appService:       appService,
+		chatStorageRepo:  chatStorageRepo,
+		messageQueueRepo: messageQueueRepo,
 	}
 }
 
@@ -260,6 +270,13 @@ func (service serviceSend) SendText(ctx context.Context, request domainSend.Mess
 		return response, err
 	}
 
+	// Opt-in queue: hand the request to the per-device queue instead of sending
+	// now. Placed after validation so a bad request still fails fast, and before
+	// the client lookup so queueing does not require the device to be online.
+	if request.Queue {
+		return service.enqueueSend(ctx, domainMessageQueue.TypeText, request.Phone, request, nil)
+	}
+
 	client := whatsapp.ClientFromContext(ctx)
 	if client == nil {
 		return response, pkgError.ErrWaCLI
@@ -322,6 +339,15 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 	err = validations.ValidateSendImage(ctx, request)
 	if err != nil {
 		return response, err
+	}
+
+	// Opt-in queue: hand the request to the per-device queue instead of sending
+	// now. Placed after validation so a bad request still fails fast, and before
+	// the client lookup so queueing does not require the device to be online.
+	if request.Queue {
+		queued := request
+		queued.Image = nil
+		return service.enqueueSend(ctx, domainMessageQueue.TypeImage, request.Phone, queued, request.Image)
 	}
 
 	client := whatsapp.ClientFromContext(ctx)
@@ -497,6 +523,15 @@ func (service serviceSend) SendFile(ctx context.Context, request domainSend.File
 	err = validations.ValidateSendFile(ctx, request)
 	if err != nil {
 		return response, err
+	}
+
+	// Opt-in queue: hand the request to the per-device queue instead of sending
+	// now. Placed after validation so a bad request still fails fast, and before
+	// the client lookup so queueing does not require the device to be online.
+	if request.Queue {
+		queued := request
+		queued.File = nil
+		return service.enqueueSend(ctx, domainMessageQueue.TypeFile, request.Phone, queued, request.File)
 	}
 
 	client := whatsapp.ClientFromContext(ctx)
@@ -860,6 +895,15 @@ func (service serviceSend) SendVideo(ctx context.Context, request domainSend.Vid
 	err = validations.ValidateSendVideo(ctx, request)
 	if err != nil {
 		return response, err
+	}
+
+	// Opt-in queue: hand the request to the per-device queue instead of sending
+	// now. Placed after validation so a bad request still fails fast, and before
+	// the client lookup so queueing does not require the device to be online.
+	if request.Queue {
+		queued := request
+		queued.Video = nil
+		return service.enqueueSend(ctx, domainMessageQueue.TypeVideo, request.Phone, queued, request.Video)
 	}
 
 	client := whatsapp.ClientFromContext(ctx)
@@ -1238,6 +1282,15 @@ func (service serviceSend) SendAudio(ctx context.Context, request domainSend.Aud
 	err = validations.ValidateSendAudio(ctx, request)
 	if err != nil {
 		return response, err
+	}
+
+	// Opt-in queue: hand the request to the per-device queue instead of sending
+	// now. Placed after validation so a bad request still fails fast, and before
+	// the client lookup so queueing does not require the device to be online.
+	if request.Queue {
+		queued := request
+		queued.Audio = nil
+		return service.enqueueSend(ctx, domainMessageQueue.TypeAudio, request.Phone, queued, request.Audio)
 	}
 
 	client := whatsapp.ClientFromContext(ctx)
@@ -1630,6 +1683,15 @@ func (service serviceSend) SendSticker(ctx context.Context, request domainSend.S
 	err = validations.ValidateSendSticker(ctx, request)
 	if err != nil {
 		return response, err
+	}
+
+	// Opt-in queue: hand the request to the per-device queue instead of sending
+	// now. Placed after validation so a bad request still fails fast, and before
+	// the client lookup so queueing does not require the device to be online.
+	if request.Queue {
+		queued := request
+		queued.Sticker = nil
+		return service.enqueueSend(ctx, domainMessageQueue.TypeSticker, request.Phone, queued, request.Sticker)
 	}
 
 	client := whatsapp.ClientFromContext(ctx)

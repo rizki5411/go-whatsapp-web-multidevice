@@ -27,7 +27,12 @@ balik ke upstream. Fork ini akan terus sync perubahan dari upstream secara berka
 ## Status kustomisasi saat ini
 - [x] Command system per device (!ping, !forward, dst) — `src/infrastructure/whatsapp/event_command_handler.go`,
       config per device di tabel `device_command_config` + `src/ui/rest/command_config.go`
-- [ ] Antrian pesan personal per device (persisten, delay acak 2-5mnt)
+- [x] Antrian pesan personal per device (persisten, delay acak 2-5mnt) — opt-in
+      `queue:true` pada `/send/message` + 5 endpoint media. Domain
+      `src/domains/messagequeue/`, repo `sqlite_repository_message_queue.go`
+      (tabel `message_queue`, migration 50-52), worker
+      `src/infrastructure/whatsapp/message_queue_worker.go`, enqueue/dispatch
+      `src/usecase/send_queue.go`, API `src/ui/rest/message_queue.go`
 
 ## Pola yang WAJIB diikuti untuk fitur baru
 - Config per-device yang perlu disimpan & diatur lewat API: ikuti pola
