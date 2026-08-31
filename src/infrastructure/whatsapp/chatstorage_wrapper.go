@@ -213,6 +213,47 @@ func (r *deviceChatStorage) CountChatwootDeviceConfigs() (int, error) {
 	return r.base.CountChatwootDeviceConfigs()
 }
 
+// Device command config methods are pure pass-throughs: they are keyed by the
+// user-facing device id supplied by the caller, not by this wrapper's storage
+// device id, so injecting r.deviceID would resolve the wrong row.
+
+func (r *deviceChatStorage) SaveDeviceCommandConfig(cfg *domainChatStorage.DeviceCommandConfig) error {
+	return r.base.SaveDeviceCommandConfig(cfg)
+}
+
+func (r *deviceChatStorage) GetDeviceCommandConfig(deviceID string) (*domainChatStorage.DeviceCommandConfig, error) {
+	return r.base.GetDeviceCommandConfig(deviceID)
+}
+
+func (r *deviceChatStorage) GetDeviceCommandConfigByIdentifier(identifier string) (*domainChatStorage.DeviceCommandConfig, error) {
+	return r.base.GetDeviceCommandConfigByIdentifier(identifier)
+}
+
+func (r *deviceChatStorage) ListDeviceCommandConfigs() ([]*domainChatStorage.DeviceCommandConfig, error) {
+	return r.base.ListDeviceCommandConfigs()
+}
+
+func (r *deviceChatStorage) DeleteDeviceCommandConfig(deviceID string) error {
+	return r.base.DeleteDeviceCommandConfig(deviceID)
+}
+
+// Forward-source rows are device-scoped, so the wrapper supplies its device id
+// when the caller left it blank, matching the other scoped storage methods.
+
+func (r *deviceChatStorage) SaveMessageForwardSource(src *domainChatStorage.MessageForwardSource) error {
+	if src != nil && src.DeviceID == "" {
+		src.DeviceID = r.deviceID
+	}
+	return r.base.SaveMessageForwardSource(src)
+}
+
+func (r *deviceChatStorage) GetMessageForwardSource(deviceID, chatJID, messageID string) (*domainChatStorage.MessageForwardSource, error) {
+	if deviceID == "" {
+		deviceID = r.deviceID
+	}
+	return r.base.GetMessageForwardSource(deviceID, chatJID, messageID)
+}
+
 func (r *deviceChatStorage) GetLatestUnreadChatwootMessageLinkByChat(deviceID, waChatJID string) (*domainChatStorage.ChatwootMessageLink, error) {
 	targetDeviceID := deviceID
 	if targetDeviceID == "" {

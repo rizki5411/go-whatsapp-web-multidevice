@@ -12,7 +12,9 @@ Generated: 2026-06-06
 |------|----------|-------|
 | Repository contract | `../../domains/chatstorage/interfaces.go` | Any method addition must be implemented here and in WhatsApp wrapper. |
 | SQL implementation | `sqlite_repository.go` | Single large repository file. |
-| Migrations | `sqlite_repository.go` `getMigrations()` | Append-only list, currently 29 migrations. |
+| Migrations | `sqlite_repository.go` `getMigrations()` | Append-only list, currently 47 migrations. |
+| Command config | `sqlite_repository_command_config.go` | Per-device `!` command config; JSON columns decoded in the shared row scanner. |
+| Forward provenance | `sqlite_repository_command_config.go` | `command_forward_source` keeps channel attribution the `messages` table cannot hold. |
 | Message edit history | `sqlite_repository.go`, `sqlite_repository_edit_test.go` | `message_edits` is append-only history while original message content updates. |
 | Chatwoot links | `sqlite_repository.go`, `../../domains/chatstorage/chatstorage.go` | Maps WhatsApp and Chatwoot IDs for idempotency, read/delete sync, and webhook routing. |
 | Chatwoot retry queue | `sqlite_repository.go` | Persists live forward retry jobs across restarts. |
@@ -27,6 +29,8 @@ Generated: 2026-06-06
 - Use `GetChatByDevice`, `DeleteChatByDevice`, `DeleteMessageByDevice`, and count-by-device variants for scoped flows.
 - `chatwoot_message_links` primary key is `(device_id, wa_message_id)`; link lookups by Chatwoot ID and unread chat are indexed.
 - `chatwoot_forward_queue` uniqueness is `(device_id, event_name, wa_message_id)`; cleanup paths must include it.
+- `device_command_config` is unique on `device_id`, with a partial unique index on non-empty `device_jid`; `GetDeviceCommandConfigByIdentifier` resolves either identity and errors on a collision rather than picking a winner.
+- `command_forward_source` is keyed `(device_id, chat_jid, message_id)` and is cleaned up by `DeleteDeviceData`; rows are only written for messages that carry channel attribution.
 - `CreateMessage` and sent-message storage derive the current device identity from the whatsmeow client context.
 - `status@broadcast` must always produce display name `Status`.
 - Storage tests use real SQLite drivers, including temp DB and in-memory variants.

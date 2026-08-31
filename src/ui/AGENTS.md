@@ -25,6 +25,8 @@ ui/
 | Device context | `rest/middleware/device.go`, `mcp/route.go`, `mcp/device.go` | REST uses header/query; MCP uses the connection's `X-Device-Id` header (set in `route.go`'s `HTTPContextFunc`), overridable per call by a `device_id` tool argument (`resolveDeviceContext`), else the default/only device. |
 | Send transport fields | `rest/send.go`, `mcp/send.go` | REST receives full send DTOs; MCP send is a smaller tool subset with manual args. |
 | Chatwoot webhook | `rest/chatwoot.go` | Public route, optional shared secret, echo suppression, read/delete sync. |
+| Chat command config | `rest/command_config.go` | Per-device `!` command targets and sender whitelist; `:device_id` path param. |
+| Chat command console | `rest/command_ui.go`, `rest/assets/command_ui.html` | Embedded operator page at `/command/ui`; gowa-ui cannot host it. |
 | Websocket changes | `websocket/websocket.go`, `../views/index.html` | Browser connects with `?device_id=`. |
 
 ## CONVENTIONS
@@ -32,6 +34,7 @@ ui/
 - REST handlers parse request bodies with Fiber, add uploaded files from `FormFile`, sanitize phones where existing handlers do, then call usecases.
 - REST success payloads use `utils.ResponseData{Status: 200, Code: "SUCCESS", Message: ..., Results: ...}`.
 - Device management routes are registered outside `DeviceMiddleware`; most operational routes are wrapped by it.
+- Config routes that take `:device_id` as a path param (Chatwoot config, command config) are registered outside `DeviceMiddleware`, which reads only header/query, and resolve the device themselves via `DeviceManager.ResolveDevice` plus `strings.Clone` (fasthttp recycles the param buffer, and these ids are persisted).
 - Chatwoot webhook is registered before basic auth so Chatwoot can POST without the app's Basic Auth header.
 - If `CHATWOOT_WEBHOOK_SECRET` is set, the public Chatwoot webhook must pass the shared-secret check before sending to WhatsApp.
 - MCP handlers validate argument types manually and return `mcp.NewToolResultText(...)`.
@@ -43,5 +46,7 @@ ui/
 - Do not put WhatsApp business logic in REST/MCP handlers.
 - Do not assume every MCP call carries a `device_id` argument; fall through to the connection's `X-Device-Id`-derived device via `resolveDeviceContext`, and only then the default/only device.
 - Do not register device-scoped REST operations outside `DeviceMiddleware`.
+- Do not accept command config targets for commands that are not in `whatsapp.RegisteredCommands()`; a typo would be stored and silently never fire.
+- Do not add this fork's own settings pages to the gowa-ui dashboard; it is a separate project whose released HTML is replaced on every auto-update. Embed them under `rest/assets/` instead, self-contained (no CDN) because the server is often offline.
 - Do not expose new unauthenticated REST paths unless they are health checks or explicitly public webhooks.
 - Do not remove Chatwoot `source_id` and sent-message cache echo guards without a replacement loop breaker.

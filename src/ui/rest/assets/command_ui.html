@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Command Routing</title>
+<style>
+  :root {
+    --paper:   #eef1f4;
+    --surface: #ffffff;
+    --sunken:  #f7f9fa;
+    --ink:     #16202b;
+    --muted:   #5e6c7a;
+    --line:    #d3dae1;
+    --line-strong: #b6c1cb;
+    --signal:  #b5540a;
+    --signal-soft: #fdf0e4;
+    --live:    #0f7b6c;
+    --danger:  #a32020;
+    --focus:   #1c6fd0;
+
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:   #10161d;
+      --surface: #18212b;
+      --sunken:  #131b23;
+      --ink:     #e6ecf2;
+      --muted:   #93a2b1;
+      --line:    #2b3945;
+      --line-strong: #3d4e5d;
+      --signal:  #f0a05a;
+      --signal-soft: #2e2013;
+      --live:    #4fc0ac;
+      --danger:  #e88080;
+      --focus:   #6aa9f0;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 40px 24px 140px; }
+
+  /* Micro-labels: uppercase + wide tracking is the dispatch-sheet vernacular. */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+
+  h1 { font-size: 27px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 62ch; }
+
+  /* Machine addresses are always mono; human labels are always sans. */
+  .jid { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 240px; flex: 1; }
+  .field label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+  select, input[type=text] {
+    font: inherit;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 9px 11px;
+    width: 100%;
+  }
+  input[type=text] { font-family: var(--mono); font-size: 13px; }
+  select:focus-visible, input:focus-visible, button:focus-visible, .grp:focus-within {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .state { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; padding-bottom: 10px; }
+  .state.on  { color: var(--live); }
+  .state.off { color: var(--muted); }
+
+  /* Signature: the dispatch line. It draws the one fact this page controls —
+     which device fans !forward out to how many groups — and moves as you edit. */
+  .dispatch {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin: 22px 0 30px;
+    padding: 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--signal);
+    border-radius: 8px;
+  }
+  .dispatch.idle { border-left-color: var(--line-strong); }
+  .node {
+    font-family: var(--mono); font-size: 12.5px;
+    border: 1px solid var(--line-strong);
+    border-radius: 5px;
+    padding: 7px 11px;
+    background: var(--sunken);
+    white-space: nowrap;
+  }
+  .wire { flex: 1 1 90px; display: flex; align-items: center; gap: 8px; min-width: 90px; }
+  .wire i {
+    flex: 1; height: 1px; background: var(--line-strong); display: block;
+  }
+  .token {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--signal); background: var(--signal-soft);
+    border: 1px solid var(--signal); border-radius: 4px;
+    padding: 3px 8px; white-space: nowrap;
+  }
+  .dispatch.idle .token { color: var(--muted); background: var(--sunken); border-color: var(--line-strong); }
+  .arrow { color: var(--line-strong); font-size: 15px; }
+  .count { font-weight: 650; font-size: 20px; letter-spacing: -0.01em; transition: color .18s ease; }
+  .count small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 5px; letter-spacing: 0; }
+
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 800px) { .panels { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    display: flex; flex-direction: column;
+    min-height: 260px;
+  }
+  .panel > header { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
+  .panel h2 { font-size: 13px; font-weight: 650; letter-spacing: 0.02em; margin: 0 0 3px; }
+  .panel .hint { font-size: 12.5px; color: var(--muted); margin: 0; }
+  .panel .body { padding: 14px 18px 18px; flex: 1; }
+
+  .filter { margin-bottom: 10px; }
+  .list { max-height: 330px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+
+  .grp {
+    display: flex; gap: 11px; align-items: flex-start;
+    padding: 9px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .grp:hover { background: var(--sunken); }
+  .grp.sel { background: var(--signal-soft); border-color: var(--signal); }
+  .grp input { margin: 3px 0 0; accent-color: var(--signal); flex-shrink: 0; }
+  .grp .nm { font-size: 13.5px; font-weight: 550; line-height: 1.35; }
+  .grp .jid { color: var(--muted); }
+  .grp.orphan .nm { color: var(--danger); }
+
+  .modes { display: grid; gap: 9px; }
+  .mode {
+    display: flex; gap: 11px; align-items: flex-start;
+    border: 1px solid var(--line-strong); border-radius: 7px;
+    padding: 11px 13px; cursor: pointer;
+  }
+  .mode:hover { background: var(--sunken); }
+  .mode.sel { border-color: var(--signal); background: var(--signal-soft); }
+  .mode input { margin: 3px 0 0; accent-color: var(--signal); flex-shrink: 0; }
+  .mode > span { display: block; flex: 1; min-width: 0; }
+  .mode .t { display: block; font-size: 13.5px; font-weight: 600; }
+  .mode .d { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  /* A miniature of what the group actually receives — the difference between the
+     two modes is one line of chrome, so showing it beats describing it twice. */
+  .mode .sample {
+    display: inline-block; font-size: 12px; margin-top: 9px; padding: 7px 10px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 7px 7px 7px 2px; min-width: 150px;
+  }
+  .mode .sample .lbl {
+    display: block; font-size: 10.5px; font-style: italic;
+    color: var(--muted); margin-bottom: 3px;
+  }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 12px;
+    background: var(--sunken); border: 1px solid var(--line-strong);
+    border-radius: 20px; padding: 5px 6px 5px 12px;
+  }
+  .chip.owner { border-style: dashed; color: var(--muted); font-family: var(--sans); padding-right: 12px; }
+  .chip button {
+    border: 0; background: transparent; color: var(--muted);
+    cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 5px; border-radius: 50%;
+  }
+  .chip button:hover { color: var(--danger); background: var(--paper); }
+
+  .empty { color: var(--muted); font-size: 13.5px; padding: 22px 4px; }
+  .empty b { color: var(--ink); font-weight: 600; display: block; margin-bottom: 3px; }
+
+  .savebar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--surface); border-top: 1px solid var(--line);
+    padding: 14px 24px;
+  }
+  .savebar .inner { max-width: 1000px; margin: 0 auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .savebar .msg { flex: 1; font-size: 13.5px; min-width: 180px; }
+  .savebar .msg.err { color: var(--danger); }
+  .savebar .msg.ok  { color: var(--live); }
+
+  button.act {
+    font: inherit; font-weight: 600; font-size: 14px;
+    padding: 9px 18px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--signal); background: var(--signal); color: #fff;
+  }
+  button.act:hover:not(:disabled) { filter: brightness(1.08); }
+  button.act:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--muted); border-color: var(--line-strong); }
+  button.ghost:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); filter: none; }
+
+  .toggle { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; cursor: pointer; }
+  .toggle input { accent-color: var(--signal); width: 16px; height: 16px; }
+
+  .cmds { margin-top: 26px; font-size: 12.5px; color: var(--muted); }
+  .cmds code { margin-right: 4px; }
+
+  [hidden] { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Chat command routing</p>
+  <h1>Command WhatsApp per device</h1>
+  <p class="lede">
+    Tentukan grup mana yang dituju <code>!forward</code>, dan siapa selain Anda yang boleh
+    menjalankan command. Anda sebagai pemilik device selalu boleh, tanpa perlu didaftarkan.
+  </p>
+
+  <div class="bar">
+    <div class="field">
+      <label for="dev">Device</label>
+      <select id="dev"><option value="">Memuat…</option></select>
+    </div>
+    <div class="state off" id="devstate"></div>
+    <label class="toggle" for="enabled">
+      <input type="checkbox" id="enabled" checked>
+      Command aktif di device ini
+    </label>
+  </div>
+
+  <!-- Signature: live routing diagram -->
+  <div class="dispatch idle" id="dispatch">
+    <span class="node" id="devnode">—</span>
+    <span class="wire"><i></i><span class="token">!forward</span><i></i><span class="arrow">▶</span></span>
+    <span class="count" id="count">0<small>grup tujuan</small></span>
+  </div>
+
+  <div class="panels">
+    <section class="panel">
+      <header>
+        <h2>Grup tujuan !forward</h2>
+        <p class="hint">Pesan yang Anda balas dengan <code>!forward</code> diteruskan ke grup yang dicentang.</p>
+      </header>
+      <div class="body">
+        <input class="filter" type="text" id="q" placeholder="Cari grup…" aria-label="Cari grup" autocomplete="off" hidden>
+        <div class="list" id="groups">
+          <div class="empty">Pilih device dulu.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <header>
+        <h2>Yang boleh menjalankan command</h2>
+        <p class="hint">Tambahkan nomor orang lain. Format internasional, tanpa <code>0</code> atau <code>+</code> di depan.</p>
+      </header>
+      <div class="body">
+        <input type="text" id="sender" placeholder="628123456789 — tekan Enter"
+               aria-label="Nomor yang boleh menjalankan command" autocomplete="off">
+        <div class="chips" id="senders"></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:18px">
+    <header>
+      <h2>Cara !forward mengirim</h2>
+      <p class="hint">Menentukan apakah grup tujuan melihat label <i>Diteruskan</i> di pesannya.</p>
+    </header>
+    <div class="body">
+      <div class="modes">
+        <label class="mode sel" id="mode-forwarded">
+          <input type="radio" name="fmode" value="forwarded" checked>
+          <span>
+            <span class="t">Mode diteruskan</span>
+            <span class="d">Sama seperti tombol Teruskan di WhatsApp. Grup tahu pesan ini berasal dari chat lain.</span>
+            <span class="sample"><i class="lbl">↩ Diteruskan</i>Isi pesannya</span>
+          </span>
+        </label>
+        <label class="mode" id="mode-plain">
+          <input type="radio" name="fmode" value="plain">
+          <span>
+            <span class="t">Mode chat biasa</span>
+            <span class="d">Tanpa label. Grup melihatnya seolah pesan itu Anda ketik langsung di sana.</span>
+            <span class="sample">Isi pesannya</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <p class="cmds" id="cmds"></p>
+</div>
+
+<div class="savebar">
+  <div class="inner">
+    <span class="msg" id="msg"></span>
+    <button class="act ghost" id="del" disabled>Hapus konfigurasi</button>
+    <button class="act" id="save" disabled>Simpan routing</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // The console is served at {basePath}/command/ui, so strip that suffix to get
+  // the API root. Keeps working when APP_BASE_PATH is set.
+  var API = window.location.pathname.replace(/\/command\/ui\/?$/, "");
+
+  var el = function (id) { return document.getElementById(id); };
+  var devSel = el("dev"), devState = el("devstate"), devNode = el("devnode");
+  var enabled = el("enabled"), dispatch = el("dispatch"), count = el("count");
+  var groupBox = el("groups"), filter = el("q");
+  var senderInput = el("sender"), senderBox = el("senders");
+  var modeInputs = Array.prototype.slice.call(document.getElementsByName("fmode"));
+  var msg = el("msg"), saveBtn = el("save"), delBtn = el("del"), cmds = el("cmds");
+
+  var state = {
+    device: null,
+    groups: [],          // [{jid, name}] from WhatsApp
+    targets: [],         // selected group JIDs
+    senders: [],         // allowed sender JIDs
+    mode: "forwarded",   // how !forward delivers
+    otherTargets: {},    // command_targets for commands other than "forward"
+    exists: false        // whether a config row already exists
+  };
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    opts.headers = Object.assign({ "Accept": "application/json" }, opts.headers || {});
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        return { status: r.status, body: body };
+      });
+    });
+  }
+
+  function say(text, kind) {
+    msg.textContent = text || "";
+    msg.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // --- rendering -----------------------------------------------------------
+
+  function renderDispatch() {
+    var n = state.targets.length;
+    count.innerHTML = n + "<small>" + (n === 1 ? "grup tujuan" : "grup tujuan") + "</small>";
+    var live = n > 0 && enabled.checked;
+    dispatch.classList.toggle("idle", !live);
+    count.style.color = live ? "var(--signal)" : "var(--muted)";
+  }
+
+  function renderGroups() {
+    if (!state.device) {
+      groupBox.innerHTML = '<div class="empty">Pilih device dulu.</div>';
+      filter.hidden = true;
+      return;
+    }
+
+    // Targets already saved but no longer among the joined groups must stay
+    // visible — silently dropping them would delete routing on the next save.
+    var known = {};
+    state.groups.forEach(function (g) { known[g.jid] = true; });
+    var orphans = state.targets.filter(function (j) { return !known[j]; })
+                               .map(function (j) { return { jid: j, name: "Bukan anggota grup ini lagi", orphan: true }; });
+    var rows = orphans.concat(state.groups);
+
+    if (!rows.length) {
+      groupBox.innerHTML = '<div class="empty"><b>Tidak ada grup yang bisa dibaca.</b>' +
+        'Device harus berstatus logged in supaya daftar grupnya bisa diambil.</div>';
+      filter.hidden = true;
+      return;
+    }
+
+    filter.hidden = false;
+    var q = filter.value.trim().toLowerCase();
+    var shown = rows.filter(function (g) {
+      return !q || g.name.toLowerCase().indexOf(q) > -1 || g.jid.toLowerCase().indexOf(q) > -1;
+    });
+
+    if (!shown.length) {
+      groupBox.innerHTML = '<div class="empty">Tidak ada grup yang cocok dengan "' + esc(filter.value) + '".</div>';
+      return;
+    }
+
+    groupBox.innerHTML = shown.map(function (g) {
+      var on = state.targets.indexOf(g.jid) > -1;
+      return '<label class="grp' + (on ? " sel" : "") + (g.orphan ? " orphan" : "") + '">' +
+               '<input type="checkbox" data-jid="' + esc(g.jid) + '"' + (on ? " checked" : "") + '>' +
+               '<span><span class="nm">' + esc(g.name || "(tanpa nama)") + '</span>' +
+               '<br><span class="jid">' + esc(g.jid) + '</span></span>' +
+             '</label>';
+    }).join("");
+  }
+
+  function renderSenders() {
+    var owner = '<span class="chip owner">Anda (pemilik device) — selalu boleh</span>';
+    var rest = state.senders.map(function (s, i) {
+      return '<span class="chip">' + esc(s) +
+             '<button type="button" data-i="' + i + '" aria-label="Hapus ' + esc(s) + '">&times;</button></span>';
+    }).join("");
+    senderBox.innerHTML = owner + rest;
+  }
+
+  function renderMode() {
+    modeInputs.forEach(function (r) {
+      r.checked = r.value === state.mode;
+      r.closest(".mode").classList.toggle("sel", r.checked);
+    });
+  }
+
+  function renderAll() { renderGroups(); renderSenders(); renderMode(); renderDispatch(); }
+
+  // --- loading -------------------------------------------------------------
+
+  function loadCommands() {
+    return api("/command/commands").then(function (r) {
+      var names = Array.isArray(r.body.results) ? r.body.results : [];
+      if (!names.length) return;
+      cmds.innerHTML = "Command yang dikenali build ini: " +
+        names.map(function (n) { return "<code>!" + esc(n) + "</code>"; }).join(" ");
+    }).catch(function () { /* the console still works without the hint line */ });
+  }
+
+  function loadDevices() {
+    return api("/devices").then(function (r) {
+      var list = Array.isArray(r.body.results) ? r.body.results : [];
+      if (!list.length) {
+        devSel.innerHTML = '<option value="">Belum ada device</option>';
+        say("Tambahkan dan login-kan sebuah device dulu di dashboard utama.", "err");
+        return;
+      }
+      devSel.innerHTML = '<option value="">— pilih device —</option>' + list.map(function (d) {
+        var label = d.display_name || d.phone_number || "";
+        var text = label && label !== d.id ? label + " · " + d.id : d.id;
+        return '<option value="' + esc(d.id) + '" data-state="' + esc(d.state || "") +
+               '" data-jid="' + esc(d.jid || "") + '">' + esc(text) + "</option>";
+      }).join("");
+      if (list.length === 1) { devSel.value = list[0].id; selectDevice(); }
+    });
+  }
+
+  function loadGroups(id) {
+    return api("/user/my/groups", { headers: { "X-Device-Id": id } }).then(function (r) {
+      var data = (r.body.results && r.body.results.data) || [];
+      state.groups = data.map(function (g) {
+        return { jid: g.JID || g.jid || "", name: g.Name || g.name || "" };
+      }).filter(function (g) { return g.jid; })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    }).catch(function () { state.groups = []; });
+  }
+
+  function loadConfig(id) {
+    return api("/devices/" + encodeURIComponent(id) + "/command/config").then(function (r) {
+      if (r.status === 200 && r.body.results) {
+        var c = r.body.results;
+        var t = c.command_targets || {};
+        state.exists = true;
+        state.targets = (t.forward || []).slice();
+        state.otherTargets = {};
+        Object.keys(t).forEach(function (k) { if (k !== "forward") state.otherTargets[k] = t[k]; });
+        state.senders = (c.allowed_senders || []).slice();
+        state.mode = c.forward_mode === "plain" ? "plain" : "forwarded";
+        enabled.checked = c.enabled !== false;
+      } else {
+        state.exists = false;
+        state.targets = []; state.senders = []; state.otherTargets = {};
+        state.mode = "forwarded";
+        enabled.checked = true;
+      }
+      delBtn.disabled = !state.exists;
+    });
+  }
+
+  function selectDevice() {
+    var id = devSel.value;
+    state.device = id || null;
+    saveBtn.disabled = !id;
+    say("");
+
+    var opt = devSel.selectedOptions[0];
+    var st = opt ? opt.getAttribute("data-state") : "";
+    var jid = opt ? opt.getAttribute("data-jid") : "";
+    devState.textContent = id ? (st || "unknown").replace(/_/g, " ") : "";
+    devState.className = "state " + (st === "logged_in" || st === "connected" ? "on" : "off");
+    devNode.textContent = jid || id || "—";
+
+    if (!id) {
+      state.groups = []; state.targets = []; state.senders = []; state.mode = "forwarded";
+      delBtn.disabled = true;
+      renderAll();
+      return;
+    }
+
+    groupBox.innerHTML = '<div class="empty">Memuat grup…</div>';
+    Promise.all([loadConfig(id), loadGroups(id)]).then(function () {
+      renderAll();
+      if (!state.groups.length && (st !== "logged_in")) {
+        say("Device belum logged in, jadi daftar grupnya tidak bisa diambil.", "err");
+      }
+    });
+  }
+
+  // --- saving --------------------------------------------------------------
+
+  function save() {
+    if (!state.device) return;
+    var targets = Object.assign({}, state.otherTargets);
+    if (state.targets.length) targets.forward = state.targets;
+
+    saveBtn.disabled = true;
+    say("Menyimpan…");
+
+    api("/devices/" + encodeURIComponent(state.device) + "/command/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: enabled.checked,
+        forward_mode: state.mode,
+        command_targets: targets,
+        allowed_senders: state.senders
+      })
+    }).then(function (r) {
+      saveBtn.disabled = false;
+      if (r.status !== 200) {
+        say(r.body.message || ("Gagal menyimpan (HTTP " + r.status + ")"), "err");
+        return;
+      }
+      state.exists = true;
+      delBtn.disabled = false;
+      // Re-read what the server normalized so the page shows the stored truth.
+      var c = r.body.results || {};
+      state.senders = (c.allowed_senders || []).slice();
+      state.targets = ((c.command_targets || {}).forward || []).slice();
+      state.mode = c.forward_mode === "plain" ? "plain" : "forwarded";
+      renderAll();
+      say("Routing tersimpan. Berlaku langsung, tanpa restart.", "ok");
+    }).catch(function (e) {
+      saveBtn.disabled = false;
+      say("Gagal menyimpan: " + e.message, "err");
+    });
+  }
+
+  function remove() {
+    if (!state.device) return;
+    if (!window.confirm("Hapus konfigurasi command untuk device ini? Semua command jadi nonaktif di device tersebut.")) return;
+    api("/devices/" + encodeURIComponent(state.device) + "/command/config", { method: "DELETE" })
+      .then(function (r) {
+        if (r.status !== 200) { say(r.body.message || "Gagal menghapus", "err"); return; }
+        state.exists = false; state.targets = []; state.senders = []; state.otherTargets = {};
+        state.mode = "forwarded"; enabled.checked = true; delBtn.disabled = true;
+        renderAll();
+        say("Konfigurasi dihapus. Command nonaktif di device ini.", "ok");
+      });
+  }
+
+  function addSender() {
+    var raw = senderInput.value.trim().replace(/^\+/, "");
+    if (!raw) return;
+    if (/@g\.us$/i.test(raw)) { say("Itu JID grup. Isi nomor orang, bukan grup.", "err"); return; }
+    if (!/@/.test(raw)) {
+      if (!/^[0-9]{6,20}$/.test(raw)) { say("Nomor harus angka format internasional, misalnya 628123456789.", "err"); return; }
+      raw += "@s.whatsapp.net";
+    }
+    if (state.senders.indexOf(raw) > -1) { say("Nomor itu sudah ada.", "err"); return; }
+    state.senders.push(raw);
+    senderInput.value = "";
+    say("");
+    renderSenders();
+  }
+
+  // --- events --------------------------------------------------------------
+
+  devSel.addEventListener("change", selectDevice);
+  enabled.addEventListener("change", renderDispatch);
+  modeInputs.forEach(function (r) {
+    r.addEventListener("change", function () { state.mode = r.value; renderMode(); });
+  });
+  filter.addEventListener("input", renderGroups);
+
+  groupBox.addEventListener("change", function (e) {
+    var cb = e.target.closest("input[type=checkbox]");
+    if (!cb) return;
+    var jid = cb.getAttribute("data-jid");
+    var i = state.targets.indexOf(jid);
+    if (cb.checked && i < 0) state.targets.push(jid);
+    if (!cb.checked && i > -1) state.targets.splice(i, 1);
+    cb.closest(".grp").classList.toggle("sel", cb.checked);
+    renderDispatch();
+  });
+
+  senderBox.addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-i]");
+    if (!btn) return;
+    state.senders.splice(parseInt(btn.getAttribute("data-i"), 10), 1);
+    renderSenders();
+  });
+
+  senderInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); addSender(); }
+  });
+  senderInput.addEventListener("blur", addSender);
+
+  saveBtn.addEventListener("click", save);
+  delBtn.addEventListener("click", remove);
+
+  loadCommands();
+  loadDevices().catch(function (e) { say("Gagal memuat daftar device: " + e.message, "err"); });
+  renderAll();
+})();
+</script>
+</body>
+</html>

@@ -87,6 +87,17 @@ type IChatStorageRepository interface {
 	DeleteChatwootDeviceConfig(deviceID string) error
 	CountChatwootDeviceConfigs() (int, error)
 
+	// Per-device inbound command configuration ("!" chat command system)
+	SaveDeviceCommandConfig(cfg *DeviceCommandConfig) error
+	GetDeviceCommandConfig(deviceID string) (*DeviceCommandConfig, error)
+	GetDeviceCommandConfigByIdentifier(identifier string) (*DeviceCommandConfig, error)
+	ListDeviceCommandConfigs() ([]*DeviceCommandConfig, error)
+	DeleteDeviceCommandConfig(deviceID string) error
+
+	// Forward provenance for messages whose origin the messages table cannot hold
+	SaveMessageForwardSource(src *MessageForwardSource) error
+	GetMessageForwardSource(deviceID, chatJID, messageID string) (*MessageForwardSource, error)
+
 	// Statistics
 	GetChatMessageCount(chatJID string) (int64, error)
 	GetChatMessageCountByDevice(deviceID, chatJID string) (int64, error)

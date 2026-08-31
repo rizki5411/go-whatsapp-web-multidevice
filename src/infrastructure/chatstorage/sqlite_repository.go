@@ -1521,6 +1521,10 @@ func (r *SQLiteRepository) DeleteDeviceData(deviceID string) error {
 		return fmt.Errorf("failed to delete device reactions: %w", err)
 	}
 
+	if _, err := tx.Exec(`DELETE FROM command_forward_source WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("failed to delete device forward sources: %w", err)
+	}
+
 	if _, err := tx.Exec(`DELETE FROM message_edits WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("failed to delete device message edits: %w", err)
 	}
@@ -2803,6 +2807,44 @@ func (r *SQLiteRepository) getMigrations() []string {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (device_id, chat_jid, poll_message_id)
+		)`,
+
+		// Migration 45: Per-device inbound "!" chat command configuration.
+		// command_targets/allowed_senders are JSON blobs (like poll_definitions.
+		// options_json): small lists always read and written whole, never queried
+		// per element, so a relation table would buy nothing.
+		`CREATE TABLE IF NOT EXISTS device_command_config (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			device_id VARCHAR(255) NOT NULL DEFAULT '',
+			device_jid VARCHAR(255) NOT NULL DEFAULT '',
+			enabled BOOLEAN NOT NULL DEFAULT 1,
+			command_targets TEXT NOT NULL DEFAULT '{}',
+			allowed_senders TEXT NOT NULL DEFAULT '[]',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Migration 46: One command config per user-facing device id
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_command_config_device ON device_command_config(device_id)`,
+		// Migration 47: Keep device_jid lookups unambiguous (partial: ignore empty JIDs)
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_command_config_jid ON device_command_config(device_jid) WHERE device_jid <> ''`,
+		// Migration 48: How !forward delivers — "forwarded" keeps WhatsApp's
+		// Forwarded label, "plain" sends as an ordinary chat message. Defaults to
+		// "forwarded" so existing rows keep their current behavior.
+		`ALTER TABLE device_command_config ADD COLUMN forward_mode VARCHAR(16) NOT NULL DEFAULT 'forwarded'`,
+		// Migration 49: Origin of a received message that the messages table cannot
+		// hold. Chat storage keeps no ContextInfo, so WhatsApp Channel attribution
+		// would be lost the moment a channel post is saved, and !forward could not
+		// rebuild its "Forwarded from <channel>" card. Only written for messages
+		// that actually carry that attribution.
+		`CREATE TABLE IF NOT EXISTS command_forward_source (
+			device_id VARCHAR(255) NOT NULL DEFAULT '',
+			chat_jid VARCHAR(255) NOT NULL,
+			message_id VARCHAR(255) NOT NULL,
+			newsletter_jid VARCHAR(255) NOT NULL DEFAULT '',
+			newsletter_name VARCHAR(512) NOT NULL DEFAULT '',
+			server_message_id INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (device_id, chat_jid, message_id)
 		)`,
 	}
 }

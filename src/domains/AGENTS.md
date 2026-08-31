@@ -24,6 +24,7 @@ domains/
 | Add usecase contract | `<domain>/interfaces.go` | Return the domain interface from `usecase.New*Service`. |
 | Add chat storage method | `chatstorage/interfaces.go` | Also update concrete repository and WhatsApp storage wrapper. |
 | Add Chatwoot storage state | `chatstorage/chatstorage.go`, `chatstorage/interfaces.go` | Link and retry queue contracts must remain device-scoped. |
+| Add chat command config field | `chatstorage/chatstorage.go`, `chatstorage/interfaces.go` | `DeviceCommandConfig`; list/map fields use `db:"-"` and are persisted as JSON columns. |
 | Add response field | Matching DTO file | Check REST/MCP serialization expectations before renaming JSON fields. |
 
 ## CONVENTIONS
@@ -34,6 +35,7 @@ domains/
 - Storage entities carry `DeviceID`; preserve it through chat/message/edit flows.
 - `GetMessageByIDAndDevice` is the device-scoped ID lookup for user/device-isolated flows.
 - `ChatwootMessageLink` and `ChatwootForwardEvent` are storage contracts, not Chatwoot API DTOs.
+- `DeviceCommandConfig.CommandTargets`/`AllowedSenders` are `db:"-"` and marshalled into the `command_targets`/`allowed_senders` JSON columns, following `PollDefinition.Options`.
 - Existing contracts expose whatsmeow types in places. Keep that local to contracts that already need protocol details.
 
 ## ANTI-PATTERNS

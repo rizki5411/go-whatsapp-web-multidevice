@@ -45,9 +45,10 @@ go-whatsapp-web-multidevice/
 | Add REST endpoint | `src/ui/rest/`, `src/usecase/`, `src/domains/` | Handler parses request, usecase validates/executes, domain owns DTO/interface. |
 | Add MCP tool | `src/ui/mcp/` | Register in `Add*Tools`; resolve a device with `resolveDeviceContext` (`src/ui/mcp/device.go`). |
 | Handle WhatsApp event | `src/infrastructure/whatsapp/event_*.go` | Register the concrete event in `event_handler.go`. |
+| Add inbound chat command | `src/infrastructure/whatsapp/event_command_handler.go`, `src/ui/rest/command_config.go` | Register in `commandRegistry`; per-device targets and permissions live in `device_command_config`. Operator page: `src/ui/rest/assets/command_ui.html` at `/command/ui`. |
 | Presence behavior | `src/infrastructure/whatsapp/event_handler.go`, `presence_pulse.go`, `src/cmd/helpers.go` | Connect-time and scheduled pulse presence. |
 | Add chat storage method | `src/domains/chatstorage/interfaces.go`, `sqlite_repository.go`, `chatstorage_wrapper.go` | Update domain, repository, and wrapper together. |
-| Add DB migration | `src/infrastructure/chatstorage/sqlite_repository.go` `getMigrations()` | Append only. Current list has 29 migrations. |
+| Add DB migration | `src/infrastructure/chatstorage/sqlite_repository.go` `getMigrations()` | Append only. Current list has 49 migrations. |
 | Add UI component | `src/views/components/`, `src/views/index.html` | Plain JS modules, no `.vue` single-file components. |
 | Device management | `src/infrastructure/whatsapp/device_manager.go` | Central registry and purge/load/create logic. |
 | Chatwoot integration | `src/infrastructure/chatwoot/` and `src/ui/rest/chatwoot.go` | REST sync, public webhook, optional direct Postgres import. |
@@ -69,6 +70,8 @@ go-whatsapp-web-multidevice/
 | `SQLiteRepository` | struct | `src/infrastructure/chatstorage/sqlite_repository.go` | Implements chat storage, Chatwoot link/retry state, and inline migrations. |
 | `deviceChatStorage` | wrapper | `src/infrastructure/whatsapp/chatstorage_wrapper.go` | Injects or enforces device scoping for event-side storage access. |
 | `StartPresencePulseScheduler` | function | `src/infrastructure/whatsapp/presence_pulse.go` | Periodically marks connected devices available, then unavailable. |
+| `commandRegistry` | map | `src/infrastructure/whatsapp/event_command_handler.go` | Dispatch table for inbound `!` chat commands; add a command by registering it here. |
+| `DeviceCommandConfig` | struct | `src/domains/chatstorage/chatstorage.go` | Per-device command enable flag, command->target JIDs, and the extra-sender whitelist. |
 | `StartChatwootForwardRetryWorker` | function | `src/infrastructure/whatsapp/webhook_forward.go` | Replays queued WhatsApp-to-Chatwoot forward failures. |
 | `NormalizeJIDFromLID` | function | `src/infrastructure/whatsapp/jid_utils.go` | Converts `@lid` JIDs to phone JIDs where whatsmeow can resolve them. |
 | `pgimport.Importer` | struct | `src/infrastructure/chatwoot/pgimport/conn.go` | Direct Chatwoot Postgres importer for historical messages. |
@@ -108,7 +111,7 @@ go-whatsapp-web-multidevice/
 - The app uses mutable package globals for config, clients, repositories, and usecases instead of dependency injection from `main`.
 - MCP exposes 5 consolidated tools (`src/ui/mcp/`) — `whatsapp_send`, `whatsapp_message`, `whatsapp_chat`, `whatsapp_group`, `whatsapp_app` — each dispatching on a `type`/`action` argument, versus one REST route per operation.
 - Chat storage migrations are Go string literals in the repository, not external migration files.
-- The embedded UI uses Vue 3 from CDN, Fomantic UI modals/toasts, and custom delimiters `[[`, `]]`.
+- There is no embedded Vue UI any more (`src/views/` is gone). The dashboard at `/` is `gowa-ui.html`, a separate project downloaded at runtime into `storages/ui` and auto-updated, so fork-specific settings pages must be embedded by this repo instead (see `src/ui/rest/command_ui.go`).
 - Release workflows generate GoReleaser YAML into `/tmp`; there is no committed `.goreleaser.yml`.
 - `AppVersion` is hard-coded as `v8.6.0` in `src/config/settings.go`; release workflows do not inject it with ldflags.
 - `src/pkg/error` declares package name `error`; import it with aliases such as `pkgError`.

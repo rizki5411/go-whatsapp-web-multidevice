@@ -114,6 +114,61 @@ type ChatwootDeviceConfig struct {
 	UpdatedAt   time.Time `db:"updated_at"`
 }
 
+// DeviceCommandConfig is the per-device configuration for the inbound "!" chat
+// command system. DeviceID is the user-facing device id; DeviceJID mirrors the
+// WhatsApp storage JID so the event side can resolve a config from either
+// identity (same dual-identity reason as ChatwootDeviceConfig).
+// MessageForwardSource records provenance that the messages table does not keep.
+// Today that is WhatsApp Channel (newsletter) attribution: chat storage stores
+// no ContextInfo, so once a channel post is saved there is nothing left to
+// rebuild its "Forwarded from <channel>" card and View channel button from when
+// the message is forwarded on. Rows are only written for messages that actually
+// carry that attribution, which is a small minority.
+type MessageForwardSource struct {
+	DeviceID  string `db:"device_id"`
+	ChatJID   string `db:"chat_jid"`
+	MessageID string `db:"message_id"`
+	// NewsletterJID is the channel the message originated from.
+	NewsletterJID string `db:"newsletter_jid"`
+	// NewsletterName is the channel's display name, shown as the card heading.
+	NewsletterName string `db:"newsletter_name"`
+	// ServerMessageID addresses the post inside the channel so the View channel
+	// button can open it. Zero when the sender did not include one.
+	ServerMessageID int       `db:"server_message_id"`
+	CreatedAt       time.Time `db:"created_at"`
+}
+
+// Delivery modes for the !forward command.
+const (
+	// ForwardModeForwarded delivers with WhatsApp's "Forwarded" label, the
+	// same way the REST forward endpoint does. This is the default.
+	ForwardModeForwarded = "forwarded"
+	// ForwardModePlain delivers as a normal chat message: no label, so the
+	// group sees it as if it were typed there.
+	ForwardModePlain = "plain"
+)
+
+type DeviceCommandConfig struct {
+	ID        int64  `db:"id"`
+	DeviceID  string `db:"device_id"`
+	DeviceJID string `db:"device_jid"`
+	Enabled   bool   `db:"enabled"`
+	// ForwardMode selects how !forward delivers a message: ForwardModeForwarded
+	// keeps WhatsApp's "Forwarded" label, ForwardModePlain sends it as an
+	// ordinary chat message with no label.
+	ForwardMode string `db:"forward_mode"`
+	// CommandTargets maps a command name (lowercase, without the "!" prefix) to
+	// the JIDs that command fans out to. Persisted as the command_targets JSON
+	// column rather than a relation table: it is a small list always read and
+	// written whole, like PollDefinition.Options.
+	CommandTargets map[string][]string `db:"-"`
+	// AllowedSenders are sender JIDs permitted to run commands in addition to
+	// the device owner, who is always allowed. Persisted as allowed_senders JSON.
+	AllowedSenders []string  `db:"-"`
+	CreatedAt      time.Time `db:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at"`
+}
+
 // ChatwootForwardEvent is a durable retry record for a live WhatsApp event
 // that could not be delivered to Chatwoot because of a transient failure.
 type ChatwootForwardEvent struct {

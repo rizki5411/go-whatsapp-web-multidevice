@@ -57,6 +57,13 @@ func handleMessage(ctx context.Context, evt *events.Message, chatStorageRepo dom
 	// Handle auto-reply if configured
 	handleAutoReply(ctx, evt, chatStorageRepo, client)
 
+	// Record where a channel post came from before chat storage drops the context
+	// that says so; !forward needs it to rebuild the channel card.
+	captureForwardSource(ctx, evt, chatStorageRepo, client)
+
+	// Handle "!" chat commands if configured for this device
+	handleCommand(ctx, evt, chatStorageRepo, client)
+
 	// Forward to webhook if configured
 	handleWebhookForward(ctx, evt, client, pollPayload)
 }
