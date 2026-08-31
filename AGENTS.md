@@ -48,7 +48,8 @@ go-whatsapp-web-multidevice/
 | Add inbound chat command | `src/infrastructure/whatsapp/event_command_handler.go`, `src/ui/rest/command_config.go` | Register in `commandRegistry`; per-device targets and permissions live in `device_command_config`. Operator page: `src/ui/rest/assets/command_ui.html` at `/command/ui`. |
 | Presence behavior | `src/infrastructure/whatsapp/event_handler.go`, `presence_pulse.go`, `src/cmd/helpers.go` | Connect-time and scheduled pulse presence. |
 | Add chat storage method | `src/domains/chatstorage/interfaces.go`, `sqlite_repository.go`, `chatstorage_wrapper.go` | Update domain, repository, and wrapper together. |
-| Add DB migration | `src/infrastructure/chatstorage/sqlite_repository.go` `getMigrations()` | Append only. Current list has 49 migrations. |
+| Add DB migration | `src/infrastructure/chatstorage/sqlite_repository.go` `getMigrations()` | Append only, one statement per entry. Current list has 52 migrations. |
+| Per-device send queue | `src/domains/messagequeue/`, `sqlite_repository_message_queue.go`, `src/usecase/send_queue.go`, `src/infrastructure/whatsapp/message_queue_worker.go`, `src/ui/rest/message_queue.go` | Opt-in `queue:true` on `/send/message` and the 5 media endpoints. Queue contract is separate from `IChatStorageRepository`, so the wrapper needs no stubs. |
 | Add UI component | `src/views/components/`, `src/views/index.html` | Plain JS modules, no `.vue` single-file components. |
 | Device management | `src/infrastructure/whatsapp/device_manager.go` | Central registry and purge/load/create logic. |
 | Chatwoot integration | `src/infrastructure/chatwoot/` and `src/ui/rest/chatwoot.go` | REST sync, public webhook, optional direct Postgres import. |
@@ -70,6 +71,9 @@ go-whatsapp-web-multidevice/
 | `SQLiteRepository` | struct | `src/infrastructure/chatstorage/sqlite_repository.go` | Implements chat storage, Chatwoot link/retry state, and inline migrations. |
 | `deviceChatStorage` | wrapper | `src/infrastructure/whatsapp/chatstorage_wrapper.go` | Injects or enforces device scoping for event-side storage access. |
 | `StartPresencePulseScheduler` | function | `src/infrastructure/whatsapp/presence_pulse.go` | Periodically marks connected devices available, then unavailable. |
+| `StartMessageQueueScheduler` | function | `src/infrastructure/whatsapp/message_queue_worker.go` | Supervisor for the opt-in per-device send queue; one row per device per cycle with a random 2-5 min gap. |
+| `IMessageQueueRepository` | interface | `src/domains/messagequeue/interfaces.go` | Send queue contract, deliberately outside `IChatStorageRepository`. |
+| `NewMessageQueueDispatcher` | function | `src/usecase/send_queue.go` | Replays a queued row through the existing `Send*` methods; injected into the worker because `infrastructure/whatsapp` cannot import `usecase`. |
 | `commandRegistry` | map | `src/infrastructure/whatsapp/event_command_handler.go` | Dispatch table for inbound `!` chat commands; add a command by registering it here. |
 | `DeviceCommandConfig` | struct | `src/domains/chatstorage/chatstorage.go` | Per-device command enable flag, command->target JIDs, and the extra-sender whitelist. |
 | `StartChatwootForwardRetryWorker` | function | `src/infrastructure/whatsapp/webhook_forward.go` | Replays queued WhatsApp-to-Chatwoot forward failures. |

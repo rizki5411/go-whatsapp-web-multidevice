@@ -18,6 +18,7 @@ import (
 	domainDevice "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/device"
 	domainGroup "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/group"
 	domainMessage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/message"
+	domainMessageQueue "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/messagequeue"
 	domainNewsletter "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/newsletter"
 	domainSend "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/send"
 	domainUser "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/user"
@@ -40,6 +41,11 @@ var (
 	// Chat Storage
 	chatStorageDB   *sql.DB
 	chatStorageRepo domainChatStorage.IChatStorageRepository
+
+	// Per-device outbound send queue. Backed by the same *sql.DB as chat storage
+	// but exposed through its own contract, so it stays out of
+	// IChatStorageRepository and its WhatsApp-side wrapper.
+	messageQueueRepo domainMessageQueue.IMessageQueueRepository
 
 	// Usecase
 	appUsecase        domainApp.IAppUsecase
@@ -210,6 +216,26 @@ func initEnvConfig() {
 	if viper.IsSet("whatsapp_presence_pulse_duration") {
 		if duration := viper.GetDuration("whatsapp_presence_pulse_duration"); duration > 0 {
 			config.WhatsappPresencePulseDuration = duration
+		}
+	}
+
+	// Per-device outbound send queue
+	if viper.IsSet("message_queue_enabled") {
+		config.MessageQueueEnabled = viper.GetBool("message_queue_enabled")
+	}
+	if viper.IsSet("message_queue_min_delay") {
+		if delay := viper.GetDuration("message_queue_min_delay"); delay > 0 {
+			config.MessageQueueMinDelay = delay
+		}
+	}
+	if viper.IsSet("message_queue_max_delay") {
+		if delay := viper.GetDuration("message_queue_max_delay"); delay > 0 {
+			config.MessageQueueMaxDelay = delay
+		}
+	}
+	if viper.IsSet("message_queue_check_interval") {
+		if interval := viper.GetDuration("message_queue_check_interval"); interval > 0 {
+			config.MessageQueueCheckInterval = interval
 		}
 	}
 
@@ -499,6 +525,32 @@ func initFlags() {
 		`duration to stay available during a presence pulse --presence-pulse-duration <duration> | example: --presence-pulse-duration=5m`,
 	)
 
+	// Per-device outbound send queue flags
+	rootCmd.PersistentFlags().BoolVarP(
+		&config.MessageQueueEnabled,
+		"message-queue-enabled", "",
+		config.MessageQueueEnabled,
+		`enable the per-device send queue worker --message-queue-enabled <true/false> | example: --message-queue-enabled=true`,
+	)
+	rootCmd.PersistentFlags().DurationVarP(
+		&config.MessageQueueMinDelay,
+		"message-queue-min-delay", "",
+		config.MessageQueueMinDelay,
+		`minimum random gap between queued sends per device --message-queue-min-delay <duration> | example: --message-queue-min-delay=2m`,
+	)
+	rootCmd.PersistentFlags().DurationVarP(
+		&config.MessageQueueMaxDelay,
+		"message-queue-max-delay", "",
+		config.MessageQueueMaxDelay,
+		`maximum random gap between queued sends per device --message-queue-max-delay <duration> | example: --message-queue-max-delay=5m`,
+	)
+	rootCmd.PersistentFlags().DurationVarP(
+		&config.MessageQueueCheckInterval,
+		"message-queue-check-interval", "",
+		config.MessageQueueCheckInterval,
+		`how often the queue worker looks for due rows --message-queue-check-interval <duration> | example: --message-queue-check-interval=15s`,
+	)
+
 	// Chatwoot flags
 	rootCmd.PersistentFlags().BoolVarP(
 		&config.ChatwootEnabled,
@@ -660,7 +712,7 @@ func initApp() {
 	}
 
 	//preparing folder if not exist
-	err := utils.CreateFolder(config.PathQrCode, config.PathSendItems, config.PathStorages, config.PathMedia, config.PathUICache)
+	err := utils.CreateFolder(config.PathQrCode, config.PathSendItems, config.PathStorages, config.PathMedia, config.PathUICache, config.PathMessageQueue)
 	if err != nil {
 		logrus.Errorln(err)
 	}
@@ -674,6 +726,7 @@ func initApp() {
 	}
 
 	chatStorageRepo = chatstorage.NewStorageRepository(chatStorageDB)
+	messageQueueRepo = chatstorage.NewMessageQueueRepository(chatStorageDB)
 	chatStorageRepo.InitializeSchema()
 
 	whatsappDB := whatsapp.InitWaDB(ctx, config.DBURI)
@@ -694,7 +747,7 @@ func initApp() {
 	appUsecase = usecase.NewAppService(chatStorageRepo, dm)
 	callUsecase = usecase.NewCallService()
 	chatUsecase = usecase.NewChatService(chatStorageRepo)
-	sendUsecase = usecase.NewSendService(appUsecase, chatStorageRepo)
+	sendUsecase = usecase.NewSendService(appUsecase, chatStorageRepo, messageQueueRepo)
 	userUsecase = usecase.NewUserService(chatStorageRepo)
 	messageUsecase = usecase.NewMessageService(chatStorageRepo)
 	groupUsecase = usecase.NewGroupService()

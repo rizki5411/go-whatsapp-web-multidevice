@@ -9,6 +9,7 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatwoot"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/helpers"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/usecase"
 	"github.com/sirupsen/logrus"
 	"go.mau.fi/whatsmeow"
 )
@@ -54,6 +55,8 @@ func initChatwootForwarding(repo domainChatStorage.IChatStorageRepository) {
 
 var presencePulseSchedulerOnce sync.Once
 
+var messageQueueSchedulerOnce sync.Once
+
 // getValidWhatsAppClient returns an initialized WhatsApp client if available.
 func getValidWhatsAppClient() *whatsmeow.Client {
 	client := whatsappCli
@@ -94,5 +97,43 @@ func startPresencePulseSchedulerIfEnabled() {
 			config.WhatsappPresencePulseDuration,
 		)
 		logrus.Infof("presence pulse scheduler started; interval=%s duration=%s", config.WhatsappPresencePulseInterval, config.WhatsappPresencePulseDuration)
+	})
+}
+
+// startMessageQueueSchedulerIfEnabled starts the process-wide per-device send
+// queue worker once.
+//
+// Started here rather than in initApp because devices only auto-connect a couple
+// of seconds after boot; the worker polls the registry, so it picks them up as
+// they become ready. Rows left pending by a previous run are found by the same
+// polling, which is what makes restart recovery automatic.
+func startMessageQueueSchedulerIfEnabled() {
+	if !config.MessageQueueEnabled {
+		logrus.Info("message queue scheduler disabled")
+		return
+	}
+
+	dm := whatsapp.GetDeviceManager()
+	if dm == nil {
+		logrus.Warn("device manager is nil; message queue scheduler not started")
+		return
+	}
+	if messageQueueRepo == nil {
+		logrus.Warn("message queue repository is nil; message queue scheduler not started")
+		return
+	}
+
+	messageQueueSchedulerOnce.Do(func() {
+		whatsapp.StartMessageQueueScheduler(
+			context.Background(),
+			dm,
+			messageQueueRepo,
+			usecase.NewMessageQueueDispatcher(sendUsecase),
+			config.MessageQueueMinDelay,
+			config.MessageQueueMaxDelay,
+			config.MessageQueueCheckInterval,
+		)
+		logrus.Infof("message queue scheduler started; delay=%s-%s check=%s",
+			config.MessageQueueMinDelay, config.MessageQueueMaxDelay, config.MessageQueueCheckInterval)
 	})
 }

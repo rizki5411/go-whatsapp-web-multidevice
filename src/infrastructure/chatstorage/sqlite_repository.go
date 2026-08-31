@@ -1490,6 +1490,11 @@ func (r *SQLiteRepository) TruncateAllChats() error {
 		return fmt.Errorf("failed to delete poll definitions: %w", err)
 	}
 
+	_, err = tx.Exec("DELETE FROM message_queue")
+	if err != nil {
+		return fmt.Errorf("failed to delete message queue: %w", err)
+	}
+
 	// Delete messages after dependent rows to keep cleanup explicit.
 	_, err = tx.Exec("DELETE FROM messages")
 	if err != nil {
@@ -1539,6 +1544,12 @@ func (r *SQLiteRepository) DeleteDeviceData(deviceID string) error {
 
 	if _, err := tx.Exec(`DELETE FROM poll_definitions WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("failed to delete device poll definitions: %w", err)
+	}
+
+	// Queued sends for a removed device would otherwise sit pending forever.
+	// Their media files are reclaimed by the queue worker's orphan sweep.
+	if _, err := tx.Exec(`DELETE FROM message_queue WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("failed to delete device message queue: %w", err)
 	}
 
 	// Delete messages after dependent rows via direct device_id filter.
@@ -2846,5 +2857,43 @@ func (r *SQLiteRepository) getMigrations() []string {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (device_id, chat_jid, message_id)
 		)`,
+
+		// Migration 50: Opt-in per-device outbound send queue. Rows exist only for
+		// requests that carried `queue: true`; the direct send path never touches
+		// this table. device_id is the user-facing device slot id (as in
+		// device_command_config), not the WhatsApp JID: that is the identity callers
+		// address via X-Device-Id, and it survives a logout/re-login while the JID
+		// is cleared. payload is the original send request as JSON; media_path points
+		// at the durable copy of an uploaded file (empty for text and for the *_url
+		// variants, whose URL round-trips inside payload). phone is denormalized so
+		// the management API can show the target without parsing payload.
+		`CREATE TABLE IF NOT EXISTS message_queue (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			device_id VARCHAR(255) NOT NULL DEFAULT '',
+			device_jid VARCHAR(255) NOT NULL DEFAULT '',
+			message_type VARCHAR(32) NOT NULL DEFAULT '',
+			phone VARCHAR(255) NOT NULL DEFAULT '',
+			payload TEXT NOT NULL DEFAULT '{}',
+			media_path VARCHAR(1024) NOT NULL DEFAULT '',
+			status VARCHAR(16) NOT NULL DEFAULT 'pending',
+			scheduled_at TIMESTAMP NOT NULL,
+			sent_at TIMESTAMP NULL,
+			message_id VARCHAR(255) NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Migration 51: Pull the oldest due pending row for one device; also serves
+		// the management API listing, which filters by device and optional status.
+		`CREATE INDEX IF NOT EXISTS idx_message_queue_pending ON message_queue(device_id, status, created_at, id)`,
+		// Migration 52: Seed the per-device send spacing after a restart by reading
+		// the newest sent row without scanning every sent row for that device.
+		`CREATE INDEX IF NOT EXISTS idx_message_queue_sent ON message_queue(device_id, status, sent_at)`,
+		// Migration 53: Content-Type of a queued upload. The image/sticker/video/audio
+		// validators reject anything whose multipart part is not an allowed mime, so
+		// the original value has to be replayed with the rebuilt upload; deriving it
+		// from the extension alone is a guess. Empty for text, for the *_url variants,
+		// and for rows queued before this column existed.
+		`ALTER TABLE message_queue ADD COLUMN media_mime VARCHAR(128) NOT NULL DEFAULT ''`,
 	}
 }

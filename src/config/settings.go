@@ -38,6 +38,11 @@ var (
 	PathMedia     = "statics/media"
 	PathStorages  = "storages"
 	PathUICache   = "storages/ui"
+	// PathMessageQueue holds the durable copy of an uploaded file for a queued
+	// media send. Separate from PathSendItems, whose files the send path deletes
+	// as soon as a send completes; a queued file must survive until its row is
+	// actually sent, including across a restart.
+	PathMessageQueue = "statics/senditems/queue"
 
 	DBURI     = "file:storages/whatsapp.db"
 	DBKeysURI = ""
@@ -65,6 +70,14 @@ var (
 	WhatsappPresencePulseEnabled               = true          // Periodically pulse presence available, then unavailable
 	WhatsappPresencePulseInterval              = 24 * time.Hour
 	WhatsappPresencePulseDuration              = 5 * time.Minute
+
+	// Per-device outbound send queue. MessageQueueEnabled only controls the
+	// background worker; nothing is ever queued unless a request opts in with
+	// `queue: true`, so leaving it on costs an idle ticker.
+	MessageQueueEnabled       = true
+	MessageQueueMinDelay      = 2 * time.Minute
+	MessageQueueMaxDelay      = 5 * time.Minute
+	MessageQueueCheckInterval = 15 * time.Second
 
 	// WhatsappProxy is forwarded to whatsmeow's *Client.SetProxyAddress before
 	// Connect. Accepts SOCKS5/HTTP/HTTPS schemes, e.g.

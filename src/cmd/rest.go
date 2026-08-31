@@ -159,6 +159,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	// Per-device "!" chat command config; resolves :device_id manually, so it is
 	// registered outside DeviceMiddleware like the Chatwoot config routes.
 	rest.InitRestCommandConfig(apiGroup, dm, chatStorageRepo)
+	rest.InitRestMessageQueue(apiGroup, dm, messageQueueRepo)
 
 	// MCP endpoint — same usecase instances as REST, so both surfaces share
 	// one whatsmeow session. With OAuth disabled it keeps the existing global
@@ -206,6 +207,9 @@ func restServer(_ *cobra.Command, _ []string) {
 
 	// Set daily presence pulse scheduler when enabled
 	startPresencePulseSchedulerIfEnabled()
+
+	// Set per-device outbound send queue worker when enabled
+	startMessageQueueSchedulerIfEnabled()
 
 	// Listen in a goroutine so we can trap SIGINT/SIGTERM and drain the
 	// server cleanly. Without this, Fiber's Listen blocks until the OS
