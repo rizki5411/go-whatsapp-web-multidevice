@@ -157,6 +157,11 @@ type DeviceCommandConfig struct {
 	// keeps WhatsApp's "Forwarded" label, ForwardModePlain sends it as an
 	// ordinary chat message with no label.
 	ForwardMode string `db:"forward_mode"`
+	// StatusEnabled gates the !status command, which posts the replied-to
+	// message as this device's WhatsApp status. It is off by default and kept
+	// separate from Enabled: posting to every contact is a far wider blast
+	// radius than replying in one chat, so it is opted into on its own.
+	StatusEnabled bool `db:"status_enabled"`
 	// CommandTargets maps a command name (lowercase, without the "!" prefix) to
 	// the JIDs that command fans out to. Persisted as the command_targets JSON
 	// column rather than a relation table: it is a small list always read and

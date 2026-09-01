@@ -14,7 +14,7 @@ import (
 // config methods in sqlite_repository.go, kept in its own file so the new
 // feature does not grow that already large file.
 
-const deviceCommandConfigColumns = `id, device_id, device_jid, enabled, forward_mode, command_targets, allowed_senders, created_at, updated_at`
+const deviceCommandConfigColumns = `id, device_id, device_jid, enabled, forward_mode, status_enabled, command_targets, allowed_senders, created_at, updated_at`
 
 // scanDeviceCommandConfig decodes one row, including the two JSON columns, and
 // is shared by the QueryRow and rows paths.
@@ -22,7 +22,7 @@ func (r *SQLiteRepository) scanDeviceCommandConfig(scanner interface{ Scan(...an
 	cfg := &domainChatStorage.DeviceCommandConfig{}
 	var targetsJSON, sendersJSON string
 	err := scanner.Scan(
-		&cfg.ID, &cfg.DeviceID, &cfg.DeviceJID, &cfg.Enabled, &cfg.ForwardMode,
+		&cfg.ID, &cfg.DeviceID, &cfg.DeviceJID, &cfg.Enabled, &cfg.ForwardMode, &cfg.StatusEnabled,
 		&targetsJSON, &sendersJSON, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err != nil {
@@ -104,9 +104,9 @@ func (r *SQLiteRepository) SaveDeviceCommandConfig(cfg *domainChatStorage.Device
 
 	result, err := r.db.Exec(`
 		UPDATE device_command_config
-		SET device_jid = ?, enabled = ?, forward_mode = ?, command_targets = ?, allowed_senders = ?, updated_at = ?
+		SET device_jid = ?, enabled = ?, forward_mode = ?, status_enabled = ?, command_targets = ?, allowed_senders = ?, updated_at = ?
 		WHERE device_id = ?
-	`, cfg.DeviceJID, cfg.Enabled, cfg.ForwardMode, targetsJSON, sendersJSON, cfg.UpdatedAt, cfg.DeviceID)
+	`, cfg.DeviceJID, cfg.Enabled, cfg.ForwardMode, cfg.StatusEnabled, targetsJSON, sendersJSON, cfg.UpdatedAt, cfg.DeviceID)
 	if err != nil {
 		return err
 	}
@@ -115,10 +115,10 @@ func (r *SQLiteRepository) SaveDeviceCommandConfig(cfg *domainChatStorage.Device
 	if rowsAffected == 0 {
 		res, err := r.db.Exec(`
 			INSERT INTO device_command_config (
-				device_id, device_jid, enabled, forward_mode, command_targets, allowed_senders, created_at, updated_at
+				device_id, device_jid, enabled, forward_mode, status_enabled, command_targets, allowed_senders, created_at, updated_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, cfg.DeviceID, cfg.DeviceJID, cfg.Enabled, cfg.ForwardMode, targetsJSON, sendersJSON, cfg.CreatedAt, cfg.UpdatedAt)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, cfg.DeviceID, cfg.DeviceJID, cfg.Enabled, cfg.ForwardMode, cfg.StatusEnabled, targetsJSON, sendersJSON, cfg.CreatedAt, cfg.UpdatedAt)
 		if err != nil {
 			return err
 		}

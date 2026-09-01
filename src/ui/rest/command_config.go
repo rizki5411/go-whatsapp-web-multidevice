@@ -49,7 +49,10 @@ type commandConfigRequest struct {
 	Enabled *bool `json:"enabled"`
 	// ForwardMode is optional; omitted keeps the stored mode, and a new config
 	// defaults to the labelled forward.
-	ForwardMode    string              `json:"forward_mode"`
+	ForwardMode string `json:"forward_mode"`
+	// StatusEnabled gates !status. Like Enabled it is a pointer, so an omitted
+	// field keeps the stored value; a new config defaults to false.
+	StatusEnabled  *bool               `json:"status_enabled"`
 	CommandTargets map[string][]string `json:"command_targets"`
 	AllowedSenders []string            `json:"allowed_senders"`
 }
@@ -68,6 +71,7 @@ func commandConfigView(cfg *domainChatStorage.DeviceCommandConfig) map[string]an
 		"device_jid":         cfg.DeviceJID,
 		"enabled":            cfg.Enabled,
 		"forward_mode":       cfg.ForwardMode,
+		"status_enabled":     cfg.StatusEnabled,
 		"command_targets":    targets,
 		"allowed_senders":    senders,
 		"available_commands": whatsapp.RegisteredCommands(),
@@ -179,11 +183,21 @@ func (h *CommandConfigHandler) UpsertCommandConfig(c fiber.Ctx) error {
 		enabled = existing.Enabled
 	}
 
+	// Off unless asked for: !status posts to every contact the device's privacy
+	// settings allow, so it must never be switched on by an omitted field.
+	statusEnabled := false
+	if req.StatusEnabled != nil {
+		statusEnabled = *req.StatusEnabled
+	} else if existing != nil {
+		statusEnabled = existing.StatusEnabled
+	}
+
 	cfg := &domainChatStorage.DeviceCommandConfig{
 		DeviceID:       deviceID,
 		DeviceJID:      h.deviceJID(deviceID),
 		Enabled:        enabled,
 		ForwardMode:    forwardMode,
+		StatusEnabled:  statusEnabled,
 		CommandTargets: targets,
 		AllowedSenders: senders,
 	}

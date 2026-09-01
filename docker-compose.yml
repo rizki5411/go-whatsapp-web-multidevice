@@ -10,7 +10,8 @@ services:
       dockerfile: ./docker/golang.Dockerfile
     restart: "on-failure"
     ports:
-      - "3001:3001"
+      # host:container — APP_PORT di src/.env menentukan port di dalam container (3000).
+      - "3001:3000"
     env_file:
       - src/.env
     volumes:

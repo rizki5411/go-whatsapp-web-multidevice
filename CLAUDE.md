@@ -25,8 +25,11 @@ balik ke upstream. Fork ini akan terus sync perubahan dari upstream secara berka
 6. Jangan hapus atau ubah perilaku existing endpoint/response yang tidak diminta eksplisit.
 
 ## Status kustomisasi saat ini
-- [x] Command system per device (!ping, !forward, dst) — `src/infrastructure/whatsapp/event_command_handler.go`,
+- [x] Command system per device (!ping, !forward, !status, dst) — `src/infrastructure/whatsapp/event_command_handler.go`,
       config per device di tabel `device_command_config` + `src/ui/rest/command_config.go`
+- [x] `!status` — posting pesan yang di-reply jadi status/story device
+      (`src/infrastructure/whatsapp/command_status.go`), toggle `status_enabled`
+      di `device_command_config` (migration 54), diatur di `/custom/command`
 - [x] Antrian pesan personal per device (persisten, delay acak 2-5mnt) — opt-in
       `queue:true` pada `/send/message` + 5 endpoint media. Domain
       `src/domains/messagequeue/`, repo `sqlite_repository_message_queue.go`

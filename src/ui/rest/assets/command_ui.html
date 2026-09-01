@@ -252,8 +252,9 @@
   <p class="eyebrow">Chat command routing</p>
   <h1>Command WhatsApp per device</h1>
   <p class="lede">
-    Tentukan grup mana yang dituju <code>!forward</code>, dan siapa selain Anda yang boleh
-    menjalankan command. Anda sebagai pemilik device selalu boleh, tanpa perlu didaftarkan.
+    Tentukan grup mana yang dituju <code>!forward</code>, apakah <code>!status</code> boleh dipakai,
+    dan siapa selain Anda yang boleh menjalankan command. Anda sebagai pemilik device selalu boleh,
+    tanpa perlu didaftarkan.
   </p>
 
   <div class="bar">
@@ -329,6 +330,32 @@
     </div>
   </section>
 
+  <section class="panel" style="margin-top:18px">
+    <header>
+      <h2>Command !status</h2>
+      <p class="hint">Balas sebuah pesan dengan <code>!status</code> untuk memasangnya jadi status (story) device ini.</p>
+    </header>
+    <div class="body">
+      <div class="modes">
+        <label class="mode" id="statuscard">
+          <input type="checkbox" id="statusenabled">
+          <span>
+            <span class="t">Izinkan <code>!status</code> di device ini</span>
+            <span class="d">
+              Berbeda dari <code>!forward</code>, status tidak punya daftar tujuan: yang melihat
+              ditentukan pengaturan privasi status di HP device ini — secara bawaan semua kontaknya.
+              Karena itu opsi ini mati sampai Anda menyalakannya sendiri.
+            </span>
+            <span class="d">
+              Yang bisa dijadikan status: <b>teks, foto, video, dan voice note</b>. Dokumen, stiker,
+              dan video bulat ditolak dengan balasan di chat.
+            </span>
+          </span>
+        </label>
+      </div>
+    </div>
+  </section>
+
   <p class="cmds" id="cmds"></p>
 </div>
 
@@ -354,6 +381,7 @@
   var groupBox = el("groups"), filter = el("q");
   var senderInput = el("sender"), senderBox = el("senders");
   var modeInputs = Array.prototype.slice.call(document.getElementsByName("fmode"));
+  var statusEnabled = el("statusenabled"), statusCard = el("statuscard");
   var msg = el("msg"), saveBtn = el("save"), delBtn = el("del"), cmds = el("cmds");
 
   var state = {
@@ -362,6 +390,7 @@
     targets: [],         // selected group JIDs
     senders: [],         // allowed sender JIDs
     mode: "forwarded",   // how !forward delivers
+    statusEnabled: false, // whether !status may post as this device's status
     otherTargets: {},    // command_targets for commands other than "forward"
     exists: false        // whether a config row already exists
   };
@@ -457,7 +486,12 @@
     });
   }
 
-  function renderAll() { renderGroups(); renderSenders(); renderMode(); renderDispatch(); }
+  function renderStatus() {
+    statusEnabled.checked = state.statusEnabled;
+    statusCard.classList.toggle("sel", state.statusEnabled);
+  }
+
+  function renderAll() { renderGroups(); renderSenders(); renderMode(); renderStatus(); renderDispatch(); }
 
   // --- loading -------------------------------------------------------------
 
@@ -509,11 +543,13 @@
         Object.keys(t).forEach(function (k) { if (k !== "forward") state.otherTargets[k] = t[k]; });
         state.senders = (c.allowed_senders || []).slice();
         state.mode = c.forward_mode === "plain" ? "plain" : "forwarded";
+        state.statusEnabled = c.status_enabled === true;
         enabled.checked = c.enabled !== false;
       } else {
         state.exists = false;
         state.targets = []; state.senders = []; state.otherTargets = {};
         state.mode = "forwarded";
+        state.statusEnabled = false;
         enabled.checked = true;
       }
       delBtn.disabled = !state.exists;
@@ -535,6 +571,7 @@
 
     if (!id) {
       state.groups = []; state.targets = []; state.senders = []; state.mode = "forwarded";
+      state.statusEnabled = false;
       delBtn.disabled = true;
       renderAll();
       return;
@@ -565,6 +602,7 @@
       body: JSON.stringify({
         enabled: enabled.checked,
         forward_mode: state.mode,
+        status_enabled: state.statusEnabled,
         command_targets: targets,
         allowed_senders: state.senders
       })
@@ -581,6 +619,7 @@
       state.senders = (c.allowed_senders || []).slice();
       state.targets = ((c.command_targets || {}).forward || []).slice();
       state.mode = c.forward_mode === "plain" ? "plain" : "forwarded";
+      state.statusEnabled = c.status_enabled === true;
       renderAll();
       say("Routing tersimpan. Berlaku langsung, tanpa restart.", "ok");
     }).catch(function (e) {
@@ -596,7 +635,8 @@
       .then(function (r) {
         if (r.status !== 200) { say(r.body.message || "Gagal menghapus", "err"); return; }
         state.exists = false; state.targets = []; state.senders = []; state.otherTargets = {};
-        state.mode = "forwarded"; enabled.checked = true; delBtn.disabled = true;
+        state.mode = "forwarded"; state.statusEnabled = false;
+        enabled.checked = true; delBtn.disabled = true;
         renderAll();
         say("Konfigurasi dihapus. Command nonaktif di device ini.", "ok");
       });
@@ -623,6 +663,10 @@
   enabled.addEventListener("change", renderDispatch);
   modeInputs.forEach(function (r) {
     r.addEventListener("change", function () { state.mode = r.value; renderMode(); });
+  });
+  statusEnabled.addEventListener("change", function () {
+    state.statusEnabled = statusEnabled.checked;
+    renderStatus();
   });
   filter.addEventListener("input", renderGroups);
 

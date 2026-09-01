@@ -2895,5 +2895,9 @@ func (r *SQLiteRepository) getMigrations() []string {
 		// from the extension alone is a guess. Empty for text, for the *_url variants,
 		// and for rows queued before this column existed.
 		`ALTER TABLE message_queue ADD COLUMN media_mime VARCHAR(128) NOT NULL DEFAULT ''`,
+		// Migration 54: Whether !status may post the replied-to message as this
+		// device's WhatsApp status. Defaults to 0 so devices configured before this
+		// column existed do not start posting statuses on upgrade.
+		`ALTER TABLE device_command_config ADD COLUMN status_enabled BOOLEAN NOT NULL DEFAULT 0`,
 	}
 }

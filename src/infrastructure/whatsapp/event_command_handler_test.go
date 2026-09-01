@@ -285,7 +285,7 @@ func TestCommandSenderAllowed(t *testing.T) {
 
 func TestRegisteredCommandsIsSorted(t *testing.T) {
 	got := RegisteredCommands()
-	want := []string{"forward", "ping"}
+	want := []string{"forward", "ping", "status"}
 	if len(got) != len(want) {
 		t.Fatalf("RegisteredCommands() = %v, want %v", got, want)
 	}

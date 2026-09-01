@@ -59,6 +59,7 @@ type commandHandlerFunc func(ctx context.Context, cmd *commandContext) error
 var commandRegistry = map[string]commandHandlerFunc{
 	"ping":    handlePingCommand,
 	"forward": handleForwardCommand,
+	"status":  handleStatusCommand,
 }
 
 // RegisteredCommands returns the known command names in sorted order. The REST

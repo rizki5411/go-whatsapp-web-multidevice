@@ -117,6 +117,39 @@ func TestSQLiteRepositoryDeviceCommandConfigForwardMode(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryDeviceCommandConfigStatusEnabled(t *testing.T) {
+	repo := newTestSQLiteRepository(t)
+
+	// A config saved without asking for !status must read back with it off, the
+	// same state a row written before the column existed scans as.
+	cfg := &domainChatStorage.DeviceCommandConfig{DeviceID: "a", Enabled: true}
+	if err := repo.SaveDeviceCommandConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, _ := repo.GetDeviceCommandConfig("a")
+	if got.StatusEnabled {
+		t.Fatal("status_enabled should default to false")
+	}
+
+	cfg.StatusEnabled = true
+	if err := repo.SaveDeviceCommandConfig(cfg); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, _ = repo.GetDeviceCommandConfig("a")
+	if !got.StatusEnabled {
+		t.Fatal("status_enabled should round-trip as true")
+	}
+
+	cfg.StatusEnabled = false
+	if err := repo.SaveDeviceCommandConfig(cfg); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	got, _ = repo.GetDeviceCommandConfig("a")
+	if got.StatusEnabled {
+		t.Fatal("status_enabled should round-trip as false")
+	}
+}
+
 func TestSQLiteRepositoryDeviceCommandConfigMissingReturnsNil(t *testing.T) {
 	repo := newTestSQLiteRepository(t)
 

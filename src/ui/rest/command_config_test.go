@@ -218,6 +218,46 @@ func TestCommandConfigForwardMode(t *testing.T) {
 	}
 }
 
+func TestCommandConfigStatusEnabled(t *testing.T) {
+	store := newFakeCommandConfigStore()
+	app := newCommandConfigTestApp(t, store)
+
+	// Off on create: !status posts to every contact the device's privacy settings
+	// allow, so an omitted field must never switch it on.
+	resp, body := doJSON(t, app, http.MethodPut, "/devices/dev/command/config", `{}`)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create status = %d body=%s", resp.StatusCode, body)
+	}
+	if got := resultsOf(t, body)["status_enabled"]; got != false {
+		t.Fatalf("status_enabled should default to false, got %v", got)
+	}
+
+	resp, body = doJSON(t, app, http.MethodPut, "/devices/dev/command/config", `{"status_enabled":true}`)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("enable status = %d body=%s", resp.StatusCode, body)
+	}
+	if got := resultsOf(t, body)["status_enabled"]; got != true {
+		t.Fatalf("status_enabled should be true, got %v", got)
+	}
+
+	// Omitted on update keeps the stored value rather than silently disabling it.
+	resp, body = doJSON(t, app, http.MethodPut, "/devices/dev/command/config", `{"enabled":true}`)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("update status = %d body=%s", resp.StatusCode, body)
+	}
+	if got := resultsOf(t, body)["status_enabled"]; got != true {
+		t.Fatalf("omitted status_enabled must preserve true, got %v", got)
+	}
+
+	resp, body = doJSON(t, app, http.MethodPut, "/devices/dev/command/config", `{"status_enabled":false}`)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("disable status = %d body=%s", resp.StatusCode, body)
+	}
+	if got := resultsOf(t, body)["status_enabled"]; got != false {
+		t.Fatalf("status_enabled should be false again, got %v", got)
+	}
+}
+
 func TestNormalizeCommandTargetsDedupesAndDropsEmpty(t *testing.T) {
 	targets, code, msg := normalizeCommandTargets(map[string][]string{
 		"forward": {"1203630000000001@g.us", " 1203630000000001@g.us ", ""},
