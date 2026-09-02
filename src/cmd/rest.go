@@ -121,7 +121,9 @@ func restServer(_ *cobra.Command, _ []string) {
 		}()
 	}
 
-	if len(config.AppBasicAuthCredential) > 0 {
+	// Mode multi-tenant tetap terautentikasi meskipun APP_BASIC_AUTH kosong,
+	// karena seluruh usernya bisa berasal dari database.
+	if len(config.AppBasicAuthCredential) > 0 || tenancyUsecase != nil {
 		account := make(map[string]string)
 		for _, basicAuth := range config.AppBasicAuthCredential {
 			ba := strings.Split(basicAuth, ":")
@@ -132,7 +134,17 @@ func restServer(_ *cobra.Command, _ []string) {
 		}
 
 		app.Use(middleware.WebsocketQueryAuth())
-		app.Use(newBasicAuthMiddleware(account))
+
+		if tenancyUsecase != nil {
+			// Login harus terjangkau tanpa kredensial, jadi didaftarkan di atas
+			// gate — pola yang sama dipakai webhook Chatwoot dan rute discovery
+			// OAuth MCP di atas.
+			authHandler = rest.NewAuthHandler(tenancyUsecase)
+			rest.InitRestAuthPublic(app, authHandler)
+			app.Use(middleware.AuthGate(tenancyUsecase, newBasicAuthMiddleware(account)))
+		} else {
+			app.Use(newBasicAuthMiddleware(account))
+		}
 	}
 
 	// Create base path group or use app directly
@@ -169,6 +181,9 @@ func restServer(_ *cobra.Command, _ []string) {
 	// saat fitur aktif, jadi rute ini tidak ada sama sekali di mode single-tenant.
 	if tenancyUsecase != nil {
 		rest.InitRestAdminUsers(apiGroup, tenancyUsecase)
+		// /auth/me butuh principal, jadi tempatnya di belakang gate — berbeda
+		// dari /auth/login dan /auth/logout yang didaftarkan di atas.
+		rest.InitRestAuth(apiGroup, authHandler)
 	}
 
 	// MCP endpoint — same usecase instances as REST, so both surfaces share
@@ -220,6 +235,10 @@ func restServer(_ *cobra.Command, _ []string) {
 
 	// Set per-device outbound send queue worker when enabled
 	startMessageQueueSchedulerIfEnabled()
+
+	// Buang session login yang kedaluwarsa secara berkala (mode multi-tenant).
+	// Memakai uiCtx supaya goroutine-nya ikut berhenti saat server dimatikan.
+	startSessionSweeper(uiCtx)
 
 	// Listen in a goroutine so we can trap SIGINT/SIGTERM and drain the
 	// server cleanly. Without this, Fiber's Listen blocks until the OS

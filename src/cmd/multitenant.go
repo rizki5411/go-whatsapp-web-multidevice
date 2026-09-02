@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatstorage"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/usecase"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -15,6 +17,12 @@ import (
 // tenancyUsecase diisi initMultiTenant dan tetap nil saat fitur mati, sehingga
 // pemanggil bisa memakainya sebagai penanda "mode multi-tenant aktif dan siap".
 var tenancyUsecase domainTenancy.ITenancyUsecase
+
+// authHandler dibangun di restServer sebelum gate dipasang, karena rute publik
+// /auth/login harus didaftarkan di atas gate sementara /auth/me di bawahnya.
+// Keduanya harus memakai handler yang sama supaya pembatas percobaan login
+// tidak terpecah menjadi dua penghitung.
+var authHandler *rest.AuthHandler
 
 // Wiring konfigurasi untuk mode multi-tenant (isolasi device per user).
 // Ditaruh di file sendiri, bukan di root.go, supaya sync upstream tetap bebas
@@ -101,9 +109,9 @@ func initMultiTenant() {
 		return
 	}
 
-	tenancyUsecase = usecase.NewTenancyService(chatstorage.NewTenancyRepository(chatStorageDB))
+	tenancyUsecase = usecase.NewTenancyService(chatstorage.NewTenancyRepository(chatStorageDB), config.AppBasicAuthCredential)
 
-	created, err := tenancyUsecase.BootstrapAdminsFromEnv(context.Background(), config.AppBasicAuthCredential)
+	created, err := tenancyUsecase.BootstrapAdminsFromEnv(context.Background())
 	if err != nil {
 		// Seeding yang gagal tidak boleh menggagalkan startup: kredensial
 		// APP_BASIC_AUTH tetap berlaku sebagai break-glass selama username-nya
@@ -116,3 +124,38 @@ func initMultiTenant() {
 
 	logrus.Info("[MULTITENANT] mode multi-tenant aktif")
 }
+
+// startSessionSweeper membuang session kedaluwarsa secara berkala.
+//
+// Mengikuti pola lifecycle StartPresencePulseScheduler: goroutine dengan
+// ticker yang berhenti saat context dibatalkan. ResolveSession sudah menghapus
+// session mati yang kebetulan disentuh, jadi penyapu ini hanya mengurus baris
+// yang tidak pernah dipakai lagi.
+func startSessionSweeper(ctx context.Context) {
+	if tenancyUsecase == nil {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(sessionSweepInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				deleted, err := tenancyUsecase.SweepExpiredSessions(ctx)
+				if err != nil {
+					logrus.WithError(err).Warn("[MULTITENANT] penyapuan session gagal")
+					continue
+				}
+				if deleted > 0 {
+					logrus.Debugf("[MULTITENANT] %d session kedaluwarsa dibersihkan", deleted)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+const sessionSweepInterval = time.Hour

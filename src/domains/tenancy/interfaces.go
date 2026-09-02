@@ -58,7 +58,45 @@ type ITenancyUsecase interface {
 	// yang username-nya belum ada di app_user, dan mengembalikan jumlah yang
 	// dibuat. Idempoten: username yang sudah ada dilewati, sehingga password di
 	// database selalu menang atas nilai env.
-	BootstrapAdminsFromEnv(ctx context.Context, credentials []string) (created int, err error)
+	//
+	// Daftar kredensialnya diambil dari yang diberikan ke konstruktor, bukan
+	// dari parameter, supaya jalur seeding dan jalur break-glass di ResolveBasic
+	// tidak pernah bekerja atas dua daftar yang berbeda.
+	BootstrapAdminsFromEnv(ctx context.Context) (created int, err error)
+
+	// Login memverifikasi kredensial lalu menerbitkan session.
+	//
+	// Mengembalikan token mentah untuk dikirim sebagai cookie; yang disimpan
+	// hanya hash-nya. Kredensial yang salah menghasilkan ("", nil, nil), sama
+	// seperti Authenticate.
+	Login(ctx context.Context, username, password, userAgent string) (token string, principal *Principal, err error)
+
+	// Logout mencabut satu session berdasarkan token mentahnya. Idempoten:
+	// token yang tidak dikenal bukan error.
+	Logout(ctx context.Context, token string) error
+
+	// ResolveSession memvalidasi token cookie: hash, cari, cek kedaluwarsa, dan
+	// pastikan user-nya masih ada dan aktif. Session yang kedaluwarsa langsung
+	// dihapus. Mengembalikan (nil, nil) untuk token yang tidak berlaku.
+	ResolveSession(ctx context.Context, token string) (*Principal, error)
+
+	// ResolveBasic memvalidasi kredensial HTTP Basic.
+	//
+	// Memeriksa app_user lebih dulu; hanya kalau username itu BELUM ada di
+	// app_user, kredensial APP_BASIC_AUTH dipakai sebagai break-glass dan
+	// menghasilkan principal admin bertanda ViaBreakGlass. Begitu username
+	// tercatat di app_user, password database yang menang — itu yang mencegah
+	// env menjadi backdoor permanen.
+	ResolveBasic(ctx context.Context, username, password string) (*Principal, error)
+
+	// ResolvePrincipalByUsername menyusun principal tanpa memverifikasi
+	// password, untuk pemanggil yang identitasnya sudah diverifikasi jalur lain
+	// (fase 07: subject token OAuth MCP). Aturan break-glass-nya sama dengan
+	// ResolveBasic, dan keduanya memakai implementasi yang sama.
+	ResolvePrincipalByUsername(ctx context.Context, username string) (*Principal, error)
+
+	// SweepExpiredSessions menghapus session yang sudah kedaluwarsa.
+	SweepExpiredSessions(ctx context.Context) (int64, error)
 }
 
 // ITenancyRepository adalah kontrak persistensi untuk akun aplikasi,
