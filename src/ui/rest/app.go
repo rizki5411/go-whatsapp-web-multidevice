@@ -5,18 +5,31 @@ import (
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainApp "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
+	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/middleware"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/tenantfilter"
 	"github.com/gofiber/fiber/v3"
 	"go.mau.fi/whatsmeow/types"
 )
 
 type App struct {
 	Service domainApp.IAppUsecase
+
+	// Ownership nil di mode single-tenant, dan tenantfilter menjaga nil itu
+	// dengan mengembalikan daftar apa adanya.
+	Ownership domainTenancy.IDeviceOwnership
 }
 
 func InitRestApp(app fiber.Router, service domainApp.IAppUsecase) App {
-	rest := App{Service: service}
+	return InitRestAppWithOwnership(app, service, nil)
+}
+
+// InitRestAppWithOwnership mendaftarkan rute /app/* dengan penyaring
+// kepemilikan untuk GET /app/devices.
+func InitRestAppWithOwnership(app fiber.Router, service domainApp.IAppUsecase, ownership domainTenancy.IDeviceOwnership) App {
+	rest := App{Service: service, Ownership: ownership}
 	app.Get("/app/login", rest.Login)
 	app.Get("/app/login-with-code", rest.LoginWithCode)
 	app.Get("/app/passkey", rest.PasskeyChallenge)
@@ -193,6 +206,11 @@ func (handler *App) Reconnect(c fiber.Ctx) error {
 func (handler *App) Devices(c fiber.Ctx) error {
 	devices, err := handler.Service.FetchDevices(c.Context())
 	utils.PanicIfNeeded(err)
+
+	// DevicesResponse.Device berisi id slot device (inst.ID()), bukan JID —
+	// itulah kunci yang dipakai tabel device_owner.
+	devices = tenantfilter.Devices(middleware.PrincipalFrom(c), handler.Ownership, devices,
+		func(d domainApp.DevicesResponse) string { return d.Device })
 
 	return c.JSON(utils.ResponseData{
 		Status:  200,

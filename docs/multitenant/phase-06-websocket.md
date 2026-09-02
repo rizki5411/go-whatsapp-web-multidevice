@@ -271,8 +271,12 @@ sekarang, supaya gowa-ui di mode single-tenant tidak berubah perilakunya.
 ## Definition of Done
 
 - [ ] `cd src && go build ./... && go vet ./... && go test ./...` hijau.
-- [ ] `go test -race ./ui/websocket/...` hijau (fase ini menambah channel dan
-      state per koneksi — race detector wajib).
+- [ ] Race detector: `go test -race ./ui/websocket/...`. **Di mesin dev Windows
+      ini `-race` menuntut cgo dan tidak bisa dijalankan** — lihat "`-race` tidak
+      tersedia di lingkungan ini" di `README.md`. Gantinya: buktikan lewat
+      pembacaan kode bahwa `Clients` hanya disentuh dari dalam `RunHub()`, dan
+      catat di PR bahwa detector tidak dijalankan beserta alasannya. Jangan
+      menandai item ini lulus tanpa salah satu dari keduanya.
 - [ ] Flag off: payload WebSocket **identik byte-per-byte** dengan sebelum fase
       ini untuk semua event. Bandingkan langsung dengan menyalakan dua build.
 - [ ] Semua sembilan titik broadcast mengisi `DeviceID`. Buktikan dengan grep

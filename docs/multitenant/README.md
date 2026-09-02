@@ -161,6 +161,21 @@ Aturannya: **bandingkan dengan baseline di atas, bukan dengan "semua hijau".**
 Paket yang gagal harus tetap paket yang sama; kalau ada paket baru yang gagal,
 itu regresi dari pekerjaan kita.
 
+### `-race` tidak tersedia di lingkungan ini
+
+`go test -race` menuntut cgo, dan cgo tidak tersedia (tidak ada gcc). Perintahnya
+gagal dengan `-race requires cgo`.
+
+Konsekuensinya, DoD Fase 06 yang mensyaratkan `go test -race ./ui/websocket/...`
+**tidak bisa dipenuhi di mesin ini**. Yang harus dilakukan sebagai gantinya:
+
+- pastikan setiap state bersama hanya disentuh dari satu goroutine (untuk hub
+  WebSocket: hanya dari dalam `RunHub()`), dan buktikan lewat pembacaan kode,
+- jalankan `-race` di lingkungan yang punya cgo kalau ada (CI Linux, misalnya),
+- catat di PR bahwa race detector tidak dijalankan beserta alasannya.
+
+Jangan menandai DoD `-race` sebagai lulus tanpa benar-benar menjalankannya.
+
 ### Rute yang tidak terdaftar TIDAK menjawab 404
 
 Ditemukan saat verifikasi Fase 02, dan berlaku untuk seluruh fase.
@@ -199,7 +214,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 | [01](phase-01-skema-repository.md) | Skema DB, domain, repository tenancy | 00 | ya (tabel kosong) | ✅ |
 | [02](phase-02-user-management.md) | User management + bootstrap admin | 01 | ya | ✅ |
 | [03](phase-03-auth-session.md) | Auth gate: session cookie + Basic dari DB | 02 | ya | ✅ |
-| [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ⬜ |
+| [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ✅ |
 | [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ⬜ |
 | [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ⬜ |
 | [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ⬜ |

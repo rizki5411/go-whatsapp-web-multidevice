@@ -169,3 +169,42 @@ type ITenancyRepository interface {
 	// dan mengembalikan jumlah baris yang terhapus.
 	DeleteExpiredSessions(now time.Time) (int64, error)
 }
+
+// IDeviceOwnership adalah satu-satunya tempat keputusan "boleh atau tidak"
+// soal device diambil.
+//
+// Middleware, handler REST, dan (nanti) MCP semuanya memanggil interface ini,
+// supaya tidak pernah ada dua definisi kepemilikan yang bisa berbeda.
+type IDeviceOwnership interface {
+	// CanAccess melaporkan apakah principal boleh mengakses device itu.
+	//
+	// Admin selalu boleh. Device tanpa baris pemilik hanya bisa diakses admin:
+	// default yang ketat, supaya device yang gagal ter-klaim — karena bug, race,
+	// atau migrasi setengah jalan — tidak otomatis terbuka untuk semua orang.
+	// Principal nil selalu ditolak.
+	CanAccess(p *Principal, deviceID string) bool
+
+	// OwnedDeviceIDs mengembalikan device milik principal.
+	//
+	// all bernilai true untuk admin dan saat mode multi-tenant mati, artinya
+	// "tidak perlu difilter"; ids-nya diabaikan dalam kasus itu.
+	OwnedDeviceIDs(p *Principal) (ids []string, all bool)
+
+	// Claim mencatat principal sebagai pemilik device yang baru dibuat.
+	// Menolak principal break-glass, yang ber-UserID 0 dan tidak memiliki
+	// device apa pun.
+	Claim(p *Principal, deviceID string) error
+
+	// Release melepas kepemilikan; device menjadi tak-ber-owner.
+	Release(deviceID string) error
+
+	// Assign memindahkan device ke user lain. Hanya dipakai admin.
+	Assign(deviceID string, userID int64) error
+
+	// Owner mengembalikan pemilik device, atau nil kalau belum di-klaim.
+	Owner(deviceID string) (*DeviceOwner, error)
+
+	// EnsureQuota mengembalikan error kalau principal sudah mencapai
+	// device_limit-nya. Limit 0 berarti tanpa batas.
+	EnsureQuota(p *Principal) error
+}
