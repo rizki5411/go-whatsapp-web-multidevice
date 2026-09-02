@@ -46,6 +46,8 @@ func restServer(_ *cobra.Command, _ []string) {
 	// registerMcpOAuth depends on these values being loaded after flag parsing.
 	loadMcpOAuthEnvConfig()
 	loadMultiTenantEnvConfig()
+	// Harus setelah loadMultiTenantEnvConfig: flag/env baru terbaca di situ.
+	initMultiTenant()
 	fiberConfig := fiber.Config{
 		TrustProxy: true,
 		BodyLimit:  int(config.WhatsappSettingMaxVideoSize),
@@ -162,6 +164,12 @@ func restServer(_ *cobra.Command, _ []string) {
 	rest.InitRestCommandConfig(apiGroup, dm, chatStorageRepo)
 	rest.InitRestMessageQueue(apiGroup, dm, messageQueueRepo)
 	rest.InitRestCustomUI(apiGroup)
+
+	// Manajemen akun aplikasi (mode multi-tenant). tenancyUsecase hanya terisi
+	// saat fitur aktif, jadi rute ini tidak ada sama sekali di mode single-tenant.
+	if tenancyUsecase != nil {
+		rest.InitRestAdminUsers(apiGroup, tenancyUsecase)
+	}
 
 	// MCP endpoint — same usecase instances as REST, so both surfaces share
 	// one whatsmeow session. With OAuth disabled it keeps the existing global

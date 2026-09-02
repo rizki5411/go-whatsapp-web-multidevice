@@ -44,11 +44,11 @@ func NormalizeUsername(username string) string {
 // pernah ikut ke response API; handler tetap punya test yang memastikan itu,
 // karena tag JSON mudah hilang saat refactor.
 type User struct {
-	ID           int64     `db:"id"            json:"id"`
-	Username     string    `db:"username"      json:"username"`
-	PasswordHash string    `db:"password_hash" json:"-"`
-	DisplayName  string    `db:"display_name"  json:"display_name"`
-	Role         Role      `db:"role"          json:"role"`
+	ID           int64  `db:"id"            json:"id"`
+	Username     string `db:"username"      json:"username"`
+	PasswordHash string `db:"password_hash" json:"-"`
+	DisplayName  string `db:"display_name"  json:"display_name"`
+	Role         Role   `db:"role"          json:"role"`
 	// DeviceLimit 0 berarti tanpa batas.
 	DeviceLimit int       `db:"device_limit" json:"device_limit"`
 	Active      bool      `db:"active"       json:"active"`

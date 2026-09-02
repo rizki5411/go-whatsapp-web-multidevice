@@ -1,6 +1,65 @@
 package tenancy
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// CreateUserInput adalah payload pembuatan user.
+//
+// Dibungkus struct, bukan daftar parameter, supaya penambahan field nanti tidak
+// mengubah signature method dan tidak memaksa semua pemanggil ikut berubah.
+type CreateUserInput struct {
+	Username    string
+	Password    string
+	DisplayName string
+	// Role kosong berarti RoleOperator: default yang aman, supaya user yang
+	// dibuat tanpa menyebut role tidak diam-diam jadi admin.
+	Role Role
+	// DeviceLimit 0 berarti tanpa batas.
+	DeviceLimit int
+}
+
+// UpdateUserInput memakai pointer untuk setiap field: nil berarti "jangan
+// ubah".
+//
+// Tanpa pointer, PATCH yang hanya mengganti nama tampilan akan mengirim zero
+// value untuk sisanya dan diam-diam mereset role ke "" serta mengaktifkan
+// ulang user yang sengaja dinonaktifkan.
+type UpdateUserInput struct {
+	Password    *string
+	DisplayName *string
+	Role        *Role
+	DeviceLimit *int
+	Active      *bool
+}
+
+// ITenancyUsecase memegang aturan bisnis akun aplikasi: validasi bentuk,
+// invarian admin terakhir, dan pencabutan session saat kredensial berubah.
+//
+// Semua aturan itu tinggal di sini, bukan di handler REST, supaya jalur API dan
+// jalur seeding admin tunduk pada aturan yang sama persis.
+type ITenancyUsecase interface {
+	CreateUser(ctx context.Context, in CreateUserInput) (*User, error)
+	UpdateUser(ctx context.Context, id int64, in UpdateUserInput) (*User, error)
+	DeleteUser(ctx context.Context, id int64) error
+	GetUser(ctx context.Context, id int64) (*User, error)
+	ListUsers(ctx context.Context) ([]*User, error)
+
+	// Authenticate memverifikasi username dan password terhadap app_user.
+	//
+	// Mengembalikan (nil, nil) untuk SEMUA kegagalan kredensial — user tidak
+	// ada, password salah, atau user nonaktif. Pemanggil tidak boleh bisa
+	// membedakan ketiganya, karena perbedaan itu sendiri membocorkan username
+	// mana yang terdaftar.
+	Authenticate(ctx context.Context, username, password string) (*Principal, error)
+
+	// BootstrapAdminsFromEnv menyemai satu admin per kredensial APP_BASIC_AUTH
+	// yang username-nya belum ada di app_user, dan mengembalikan jumlah yang
+	// dibuat. Idempoten: username yang sudah ada dilewati, sehingga password di
+	// database selalu menang atas nilai env.
+	BootstrapAdminsFromEnv(ctx context.Context, credentials []string) (created int, err error)
+}
 
 // ITenancyRepository adalah kontrak persistensi untuk akun aplikasi,
 // kepemilikan device, dan session login.

@@ -161,6 +161,29 @@ Aturannya: **bandingkan dengan baseline di atas, bukan dengan "semua hijau".**
 Paket yang gagal harus tetap paket yang sama; kalau ada paket baru yang gagal,
 itu regresi dari pekerjaan kita.
 
+### Rute yang tidak terdaftar TIDAK menjawab 404
+
+Ditemukan saat verifikasi Fase 02, dan berlaku untuk seluruh fase.
+
+`DeviceMiddleware` dipasang pada grup ber-prefiks kosong
+(`apiGroup.Group("", middleware.DeviceMiddleware(dm))`), sehingga ia menangkap
+**setiap** path yang tidak punya handler. Jadi path asing tidak menjawab 404
+melainkan apa pun yang diputuskan middleware itu:
+
+```
+/admin/users          -> 400 DEVICE_ID_REQUIRED   (saat belum ada device)
+/jalan-yang-tidak-ada -> 400 DEVICE_ID_REQUIRED
+```
+
+Ini perilaku upstream, bukan bug fork. Konsekuensinya untuk verifikasi:
+
+- Untuk membuktikan sebuah rute **tidak terdaftar**, jangan cek status 404.
+  Cek bahwa responsnya **bukan** dari handler yang bersangkutan — misalnya
+  `code` bernilai `DEVICE_ID_REQUIRED`/`DEVICE_NOT_FOUND`, bukan `SUCCESS`.
+- Keputusan K4 (cross-tenant dijawab 404) tetap berlaku dan tidak terpengaruh:
+  angka 404 di situ ditulis eksplisit oleh guard kita, bukan diserahkan ke
+  router.
+
 Implikasi untuk **Fase 01**, yang butuh test repository terhadap SQLite
 sungguhan: pakai `-tags purego`, dan di test baru gunakan
 `sqlite.DriverName` — **jangan** menulis `"sqlite3"` sebagai literal, karena itu
@@ -174,7 +197,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 |------|-------|-----------|--------------|--------|
 | [00](phase-00-fondasi.md) | Fondasi, feature flag, baseline | — | ya (no-op) | ✅ |
 | [01](phase-01-skema-repository.md) | Skema DB, domain, repository tenancy | 00 | ya (tabel kosong) | ✅ |
-| [02](phase-02-user-management.md) | User management + bootstrap admin | 01 | ya | ⬜ |
+| [02](phase-02-user-management.md) | User management + bootstrap admin | 01 | ya | ✅ |
 | [03](phase-03-auth-session.md) | Auth gate: session cookie + Basic dari DB | 02 | ya | ⬜ |
 | [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ⬜ |
 | [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ⬜ |
