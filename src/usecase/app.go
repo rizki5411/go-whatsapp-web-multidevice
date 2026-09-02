@@ -273,20 +273,29 @@ func (service *serviceApp) Logout(ctx context.Context, deviceID string) error {
 
 	// Broadcast the logout so the UI can refresh without manual polling. The slot is
 	// kept, so the device stays listed (disconnected) and can be re-paired by id.
-	var devices []domainApp.DevicesResponse
-	if list, err := service.FetchDevices(ctx); err == nil {
-		devices = list
-	} else {
-		logrus.WithError(err).Warn("[LOGOUT] failed to fetch devices after logout")
+	result := map[string]any{"device_id": deviceID}
+
+	// Daftar device HANYA disertakan di mode single-tenant. Payload ini
+	// disiarkan ke banyak koneksi, dan daftar lengkapnya berisi device milik
+	// tenant lain — kebocoran yang tidak bisa ditutup oleh filter DeviceID
+	// karena kebocorannya ada di dalam payload, bukan pada tujuannya. Klien
+	// yang butuh daftar terbaru bisa mengirim FETCH_DEVICES, yang sudah
+	// disaring per koneksi.
+	if !config.MultiTenantEnabled {
+		var devices []domainApp.DevicesResponse
+		if list, err := service.FetchDevices(ctx); err == nil {
+			devices = list
+		} else {
+			logrus.WithError(err).Warn("[LOGOUT] failed to fetch devices after logout")
+		}
+		result["devices"] = devices
 	}
 
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "DEVICE_LOGGED_OUT",
-		Message: fmt.Sprintf("Device %s logged out (slot kept)", deviceID),
-		Result: map[string]any{
-			"device_id": deviceID,
-			"devices":   devices,
-		},
+		Code:     "DEVICE_LOGGED_OUT",
+		Message:  fmt.Sprintf("Device %s logged out (slot kept)", deviceID),
+		DeviceID: deviceID,
+		Result:   result,
 	}
 
 	return nil
