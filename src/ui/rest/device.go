@@ -6,16 +6,31 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/domains/device"
+	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/middleware"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/tenantfilter"
 	"github.com/gofiber/fiber/v3"
+	"github.com/sirupsen/logrus"
 )
 
 type Device struct {
 	Service device.IDeviceUsecase
+
+	// Ownership nil di mode single-tenant; setiap pemakaian di bawah menjaga
+	// nil itu, sehingga perilaku lama tidak berubah.
+	Ownership domainTenancy.IDeviceOwnership
 }
 
 func InitRestDevice(app fiber.Router, service device.IDeviceUsecase) Device {
-	rest := Device{Service: service}
+	return InitRestDeviceWithOwnership(app, service, nil)
+}
+
+// InitRestDeviceWithOwnership mendaftarkan rute device beserta penjaga
+// kepemilikannya. Rute ini memakai path param sehingga berada di luar
+// DeviceMiddleware/DeviceOwnerGuard dan harus menjaga dirinya sendiri.
+func InitRestDeviceWithOwnership(app fiber.Router, service device.IDeviceUsecase, ownership domainTenancy.IDeviceOwnership) Device {
+	rest := Device{Service: service, Ownership: ownership}
 
 	app.Get("/devices", rest.ListDevices)
 	app.Post("/devices", rest.AddDevice)
@@ -38,6 +53,11 @@ func (handler *Device) ListDevices(c fiber.Ctx) error {
 	devices, err := handler.Service.ListDevices(c.Context())
 	utils.PanicIfNeeded(err)
 
+	// Inilah yang membuat dashboard gowa-ui otomatis benar: ia menampilkan apa
+	// pun yang endpoint ini kembalikan, dan HTML-nya tidak bisa kita ubah.
+	devices = tenantfilter.Devices(middleware.PrincipalFrom(c), handler.Ownership, devices,
+		func(d device.Device) string { return d.ID })
+
 	return c.JSON(utils.ResponseData{
 		Status:  200,
 		Code:    "SUCCESS",
@@ -48,6 +68,9 @@ func (handler *Device) ListDevices(c fiber.Ctx) error {
 
 func (handler *Device) GetDevice(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	device, err := handler.Service.GetDevice(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
 
@@ -87,8 +110,36 @@ func (handler *Device) AddDevice(c fiber.Ctx) error {
 		}
 	}
 
+	principal := middleware.PrincipalFrom(c)
+
+	// Kuota diperiksa SEBELUM device dibuat, supaya penolakan tidak pernah
+	// meninggalkan slot device yatim.
+	if handler.Ownership != nil {
+		if err := handler.Ownership.EnsureQuota(principal); err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(utils.ResponseData{
+				Status:  fiber.StatusForbidden,
+				Code:    "DEVICE_LIMIT_REACHED",
+				Message: err.Error(),
+			})
+		}
+	}
+
 	device, err := handler.Service.AddDevice(c.Context(), req.DeviceID, webhook)
 	utils.PanicIfNeeded(err)
+
+	if handler.Ownership != nil {
+		if err := handler.Ownership.Claim(principal, device.ID); err != nil {
+			// Device sudah terbuat; melaporkan sukses akan menyembunyikan bahwa
+			// ia tak-ber-owner dan karenanya hanya terlihat admin. Pola pesan
+			// jujur yang sama dipakai AddDevice untuk kegagalan simpan webhook.
+			return c.Status(fiber.StatusInternalServerError).JSON(utils.ResponseData{
+				Status:  fiber.StatusInternalServerError,
+				Code:    "DEVICE_CLAIM_FAILED",
+				Message: fmt.Sprintf("device %s dibuat tetapi pemiliknya gagal dicatat (%v); device ini hanya terlihat oleh admin sampai pemiliknya ditetapkan lewat /admin/devices/%s/owner", device.ID, err, device.ID),
+				Results: map[string]any{"device_id": device.ID},
+			})
+		}
+	}
 
 	result := map[string]any{
 		"id":           device.ID,
@@ -114,8 +165,25 @@ func (handler *Device) AddDevice(c fiber.Ctx) error {
 
 func (handler *Device) RemoveDevice(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+
+	// Tanpa penjaga ini, operator mana pun bisa mem-purge device orang lain —
+	// kebocoran paling merusak di seluruh permukaan REST, karena efeknya
+	// menghapus sesi WhatsApp dan seluruh data chat device itu.
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
+
 	err := handler.Service.RemoveDevice(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
+
+	// Kepemilikan dilepas setelah purge berhasil. Baris owner yatim akan
+	// membuat device baru yang kebetulan memakai id sama langsung dimiliki
+	// pemilik lama.
+	if handler.Ownership != nil {
+		if err := handler.Ownership.Release(deviceID); err != nil {
+			logrus.WithError(err).Warnf("[MULTITENANT] gagal melepas kepemilikan device %s setelah dihapus", deviceID)
+		}
+	}
 
 	return c.JSON(utils.ResponseData{
 		Status:  200,
@@ -127,6 +195,9 @@ func (handler *Device) RemoveDevice(c fiber.Ctx) error {
 
 func (handler *Device) LoginDevice(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	response, err := handler.Service.LoginDevice(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
 
@@ -144,6 +215,9 @@ func (handler *Device) LoginDevice(c fiber.Ctx) error {
 
 func (handler *Device) LoginDeviceWithCode(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	code, err := handler.Service.LoginDeviceWithCode(c.Context(), deviceID, c.Query("phone"))
 	utils.PanicIfNeeded(err)
 
@@ -160,6 +234,9 @@ func (handler *Device) LoginDeviceWithCode(c fiber.Ctx) error {
 
 func (handler *Device) LogoutDevice(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	err := handler.Service.LogoutDevice(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
 
@@ -173,6 +250,9 @@ func (handler *Device) LogoutDevice(c fiber.Ctx) error {
 
 func (handler *Device) ReconnectDevice(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	err := handler.Service.ReconnectDevice(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
 
@@ -186,6 +266,9 @@ func (handler *Device) ReconnectDevice(c fiber.Ctx) error {
 
 func (handler *Device) Status(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	isConnected, isLoggedIn, err := handler.Service.GetStatus(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
 
@@ -204,6 +287,9 @@ func (handler *Device) Status(c fiber.Ctx) error {
 // UpdateDeviceWebhook handles PATCH /devices/:device_id/webhook.
 func (handler *Device) UpdateDeviceWebhook(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	var req struct {
 		WebhookURL                *string `json:"webhook_url"`
 		WebhookSecret             string  `json:"webhook_secret"`
@@ -256,6 +342,9 @@ func (handler *Device) UpdateDeviceWebhook(c fiber.Ctx) error {
 // GetDeviceWebhook handles GET /devices/:device_id/webhook.
 func (handler *Device) GetDeviceWebhook(c fiber.Ctx) error {
 	deviceID := c.Params("device_id")
+	if !handler.canAccessDevice(c, deviceID) {
+		return handler.deviceNotFound(c, deviceID)
+	}
 	config, err := handler.Service.GetDeviceWebhookConfig(c.Context(), deviceID)
 	utils.PanicIfNeeded(err)
 
@@ -290,5 +379,27 @@ func (handler *Device) GetDeviceWebhook(c fiber.Ctx) error {
 				return false
 			}(),
 		},
+	})
+}
+
+// canAccessDevice menegakkan kepemilikan untuk rute device yang memakai path
+// param, yaitu yang berada di luar DeviceMiddleware/DeviceOwnerGuard.
+//
+// Selalu true di mode single-tenant.
+func (handler *Device) canAccessDevice(c fiber.Ctx, deviceID string) bool {
+	if handler.Ownership == nil {
+		return true
+	}
+	return handler.Ownership.CanAccess(middleware.PrincipalFrom(c), deviceID)
+}
+
+// deviceNotFound menjawab sama seperti device yang benar-benar tidak ada,
+// supaya cross-tenant tidak bisa dibedakan darinya.
+func (handler *Device) deviceNotFound(c fiber.Ctx, deviceID string) error {
+	return c.Status(fiber.StatusNotFound).JSON(utils.ResponseData{
+		Status:  fiber.StatusNotFound,
+		Code:    "DEVICE_NOT_FOUND",
+		Message: "device not found; create a device first from /api/devices or provide a valid X-Device-Id",
+		Results: map[string]string{"device_id": deviceID},
 	})
 }

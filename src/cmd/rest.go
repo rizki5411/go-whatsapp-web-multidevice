@@ -154,7 +154,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	}
 
 	registerDeviceScopedRoutes := func(r fiber.Router) {
-		rest.InitRestApp(r, appUsecase)
+		rest.InitRestAppWithOwnership(r, appUsecase, deviceOwnership)
 		rest.InitRestCall(r, callUsecase)
 		rest.InitRestChat(r, chatUsecase)
 		rest.InitRestSend(r, sendUsecase)
@@ -166,7 +166,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	}
 
 	// Device management routes (no device_id required)
-	rest.InitRestDevice(apiGroup, deviceUsecase)
+	rest.InitRestDeviceWithOwnership(apiGroup, deviceUsecase, deviceOwnership)
 
 	// App info (version, limits) for standalone UIs; no device required
 	rest.InitRestAppInfo(apiGroup)
@@ -181,6 +181,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	// saat fitur aktif, jadi rute ini tidak ada sama sekali di mode single-tenant.
 	if tenancyUsecase != nil {
 		rest.InitRestAdminUsers(apiGroup, tenancyUsecase)
+		rest.InitRestAdminDeviceOwner(apiGroup, dm, deviceOwnership, tenancyUsecase)
 		// /auth/me butuh principal, jadi tempatnya di belakang gate — berbeda
 		// dari /auth/login dan /auth/logout yang didaftarkan di atas.
 		rest.InitRestAuth(apiGroup, authHandler)
@@ -201,7 +202,13 @@ func restServer(_ *cobra.Command, _ []string) {
 	}
 
 	// Device-scoped operations (header-based)
-	headerDeviceGroup := apiGroup.Group("", middleware.DeviceMiddleware(dm))
+	// DeviceOwnerGuard berjalan setelah DeviceMiddleware dan menegakkan
+	// kepemilikan atas device yang sudah diresolve. Dipasang sebagai middleware
+	// terpisah supaya middleware/device.go upstream tidak perlu diubah.
+	headerDeviceGroup := apiGroup.Group("",
+		middleware.DeviceMiddleware(dm),
+		middleware.DeviceOwnerGuard(dm, deviceOwnership),
+	)
 	registerDeviceScopedRoutes(headerDeviceGroup)
 
 	// Chatwoot sync + per-device config routes - require authentication (the

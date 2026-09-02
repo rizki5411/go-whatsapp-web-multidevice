@@ -24,6 +24,10 @@ var tenancyUsecase domainTenancy.ITenancyUsecase
 // tidak terpecah menjadi dua penghitung.
 var authHandler *rest.AuthHandler
 
+// deviceOwnership nil saat fitur mati. Handler dan middleware yang
+// menerimanya menjaga nil itu, sehingga perilaku single-tenant tidak berubah.
+var deviceOwnership domainTenancy.IDeviceOwnership
+
 // Wiring konfigurasi untuk mode multi-tenant (isolasi device per user).
 // Ditaruh di file sendiri, bukan di root.go, supaya sync upstream tetap bebas
 // konflik — lihat aturan fork di CLAUDE.md. Rencana lengkap per fase ada di
@@ -109,7 +113,9 @@ func initMultiTenant() {
 		return
 	}
 
-	tenancyUsecase = usecase.NewTenancyService(chatstorage.NewTenancyRepository(chatStorageDB), config.AppBasicAuthCredential)
+	tenancyRepo := chatstorage.NewTenancyRepository(chatStorageDB)
+	tenancyUsecase = usecase.NewTenancyService(tenancyRepo, config.AppBasicAuthCredential)
+	deviceOwnership = usecase.NewDeviceOwnershipService(tenancyRepo)
 
 	created, err := tenancyUsecase.BootstrapAdminsFromEnv(context.Background())
 	if err != nil {

@@ -44,3 +44,14 @@ var ErrUserNotFound = errors.New("user tidak ditemukan")
 // bisa mengelola user lagi, dan pemulihannya hanya lewat break-glass
 // APP_BASIC_AUTH atau edit database manual.
 var ErrLastAdminProtected = errors.New("tidak bisa dilakukan: instance harus punya minimal satu admin aktif")
+
+// ErrDeviceLimitReached dikembalikan saat user sudah mencapai device_limit-nya.
+var ErrDeviceLimitReached = errors.New("jumlah device sudah mencapai batas untuk user ini")
+
+// ErrBreakGlassCannotOwn dikembalikan saat principal break-glass mencoba
+// memiliki device.
+//
+// Principal itu berasal dari APP_BASIC_AUTH dan tidak punya baris app_user,
+// jadi tidak ada user_id yang sah untuk dicatat sebagai pemilik. Menyimpannya
+// dengan user_id 0 akan membuat device dimiliki identitas yang tidak ada.
+var ErrBreakGlassCannotOwn = errors.New("kredensial APP_BASIC_AUTH tidak bisa memiliki device; buat akun di /admin/users lalu tetapkan pemiliknya")
