@@ -176,4 +176,21 @@ var (
 	// message when the opposite side reports deletion.
 	ChatwootMessageRead   = false
 	ChatwootMessageDelete = false
+
+	// Multi-tenant: isolasi data per user (fitur fork, bukan upstream).
+	// Saat false, seluruh guard kepemilikan device dilewati dan perilaku
+	// aplikasi identik dengan mode single-tenant — itulah jalur rollback-nya.
+	// Nyalakan hanya setelah fase enforcement selesai; rencana per fase ada di
+	// docs/multitenant/.
+	MultiTenantEnabled = false
+	// MultiTenantSessionTTL adalah umur cookie session login. Session disimpan
+	// di tabel user_session dan bisa dicabut, jadi umur panjang tidak berarti
+	// tidak bisa di-logout.
+	MultiTenantSessionTTL = 12 * time.Hour
+	// MultiTenantSessionCookie dibuat konfigurabel supaya dua instance gowa di
+	// host yang sama (beda base path) tidak saling menimpa cookie.
+	MultiTenantSessionCookie = "gowa_session"
+	// MultiTenantSecureCookie memaksa atribut Secure pada cookie session.
+	// Biarkan false untuk akses HTTP lokal; wajib true di belakang HTTPS.
+	MultiTenantSecureCookie = false
 )
