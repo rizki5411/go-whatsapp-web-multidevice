@@ -109,7 +109,22 @@ if err != nil {
 }
 ```
 
-### 2. Ganti helper lama, jangan menumpuk
+### 2. Lubang fallback pada handler DELETE (WAJIB, mudah terlewat)
+
+`DeleteCommandConfig` dan `DeleteChatwootConfig` sengaja jatuh ke path param
+mentah kalau resolusi device gagal, "so a config orphaned by device removal
+stays deletable".
+
+Jalur itu **melewati** pemeriksaan kepemilikan — memasang guard di dalam
+resolver saja tidak cukup. Tanpa penanganan khusus, operator bisa menghapus
+config device orang lain hanya dengan mengirim id yang tidak resolve.
+
+Aturannya: jalur fallback dibatasi ke admin, konsisten dengan "device tanpa
+pemilik hanya untuk admin". Pakai `tenantfilter.CanActOnUnresolvedDevice`.
+Keduanya wajib punya test — operator ditolak dan config-nya utuh, admin tetap
+bisa membersihkan.
+
+### 3. Ganti helper lama, jangan menumpuk
 
 `command_config.go` punya `resolveConfigDeviceID`, `chatwoot_config.go` punya
 yang serupa. **Ubah isi fungsi lama itu** agar mendelegasikan ke
@@ -124,7 +139,7 @@ fiber, atau pertahankan `(string, bool)` dan tulis response di dalamnya. Pilih
 yang perubahannya paling kecil terhadap call site yang ada — **jangan** refactor
 seluruh file (aturan fork nomor 2).
 
-### 3. Endpoint agregat
+### 4. Endpoint agregat
 
 **`GET /command/configs`** (`ListCommandConfigs`) dan **`GET /chatwoot/configs`**
 (`ListChatwootConfigs`) mengembalikan config untuk semua device. Filter hasilnya
@@ -150,7 +165,7 @@ admin** (`RequireAdmin`) — sinkronisasi lintas device bukan operasi yang bisa
 dipegang operator. Kalau ternyata device-scoped, guard seperti yang lain.
 Putuskan berdasarkan kode, dan **tulis alasannya di komentar**.
 
-### 4. `message_queue.go`
+### 5. `message_queue.go`
 
 `DELETE /devices/:device_id/queue/:queue_id` punya lubang kedua yang mudah
 terlewat: setelah device ter-guard, `queue_id` masih bisa milik device lain kalau
@@ -170,7 +185,7 @@ di file itu (additive, method baru — jangan ubah yang lama), atau lakukan
 pengecekan di handler. Yang mana pun, **harus ada test** untuk kasus "operator A
 membatalkan queue id milik device B".
 
-### 5. `device.go` — perhatikan `Status` dan `Login`
+### 6. `device.go` — sudah selesai di Fase 04
 
 `GET /devices/:device_id/login` mengembalikan QR code. Tanpa guard, operator lain
 bisa memancing QR untuk device orang lain dan memasangkan dirinya. Ini rute

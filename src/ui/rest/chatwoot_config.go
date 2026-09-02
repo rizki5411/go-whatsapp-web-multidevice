@@ -9,6 +9,8 @@ import (
 	domainChatStorage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatwoot"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/middleware"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/tenantfilter"
 	"github.com/gofiber/fiber/v3"
 	"github.com/sirupsen/logrus"
 )
@@ -75,6 +77,9 @@ func (h *ChatwootHandler) ListChatwootConfigs(c fiber.Ctx) error {
 	if err != nil {
 		return utils.ResponseError(c, fmt.Sprintf("failed to list configs: %v", err))
 	}
+	configs = tenantfilter.ByDeviceID(middleware.PrincipalFrom(c), h.Ownership, configs,
+		func(cfg *domainChatStorage.ChatwootDeviceConfig) string { return cfg.DeviceID })
+
 	views := make([]map[string]any, 0, len(configs))
 	for _, cfg := range configs {
 		views = append(views, chatwootConfigView(cfg))
@@ -202,6 +207,14 @@ func (h *ChatwootHandler) DeleteChatwootConfig(c fiber.Ctx) error {
 	// param so a config orphaned by device removal stays deletable.
 	deviceID, ok := h.resolveConfigDeviceID(c)
 	if !ok {
+		// Fallback ke param mentah supaya config yang yatim — device-nya sudah
+		// dihapus — tetap bisa dibersihkan. Jalur ini melewatkan pemeriksaan
+		// kepemilikan karena tidak ada device yang bisa diresolve, jadi
+		// dibatasi ke admin. Tanpa pembatasan itu, operator bisa menghapus
+		// config device orang lain hanya dengan mengirim id yang tidak resolve.
+		if !tenantfilter.CanActOnUnresolvedDevice(c, h.Ownership) {
+			return tenantfilter.DeviceNotFound(c)
+		}
 		deviceID = strings.TrimSpace(c.Params("device_id"))
 	}
 	if deviceID == "" {
@@ -233,15 +246,10 @@ func (h *ChatwootHandler) DeleteChatwootConfig(c fiber.Ctx) error {
 // request. Handlers persist this id (config rows, registry cache), so an
 // uncopied value would mutate under the next request.
 func (h *ChatwootHandler) resolveConfigDeviceID(c fiber.Ctx) (string, bool) {
-	deviceID := strings.TrimSpace(c.Params("device_id"))
-	if deviceID == "" || h.DeviceManager == nil {
-		return "", false
-	}
-	_, resolvedID, err := h.DeviceManager.ResolveDevice(deviceID)
-	if err != nil {
-		return "", false
-	}
-	return strings.Clone(resolvedID), true
+	// Kepemilikan ditegakkan DI DALAM resolver, bukan dipanggil terpisah di
+	// setiap handler: dengan begitu handler baru dari upstream yang memakai
+	// resolver ini otomatis terlindungi, alih-alih lolos tanpa suara.
+	return tenantfilter.GuardParamDevice(c, h.DeviceManager, h.Ownership)
 }
 
 // deviceJID returns the WhatsApp storage JID for a device, used so the registry

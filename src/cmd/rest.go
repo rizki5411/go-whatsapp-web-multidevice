@@ -96,6 +96,9 @@ func restServer(_ *cobra.Command, _ []string) {
 		initChatwootForwarding(chatStorageRepo)
 
 		chatwootHandler = rest.NewChatwootHandler(appUsecase, sendUsecase, messageUsecase, dm, chatStorageRepo)
+		// Penjaga kepemilikan dipasang terpisah supaya signature konstruktor
+		// upstream tidak berubah. No-op saat mode multi-tenant mati.
+		chatwootHandler.SetOwnership(deviceOwnership)
 		webhookPath := "/chatwoot/webhook"
 		if config.AppBasePath != "" {
 			webhookPath = config.AppBasePath + webhookPath
@@ -173,8 +176,8 @@ func restServer(_ *cobra.Command, _ []string) {
 
 	// Per-device "!" chat command config; resolves :device_id manually, so it is
 	// registered outside DeviceMiddleware like the Chatwoot config routes.
-	rest.InitRestCommandConfig(apiGroup, dm, chatStorageRepo)
-	rest.InitRestMessageQueue(apiGroup, dm, messageQueueRepo)
+	rest.InitRestCommandConfigWithOwnership(apiGroup, dm, chatStorageRepo, deviceOwnership)
+	rest.InitRestMessageQueueWithOwnership(apiGroup, dm, messageQueueRepo, deviceOwnership)
 	rest.InitRestCustomUI(apiGroup)
 
 	// Manajemen akun aplikasi (mode multi-tenant). tenancyUsecase hanya terisi
