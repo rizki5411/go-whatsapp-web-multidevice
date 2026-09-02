@@ -140,6 +140,10 @@ func (f *fakeTenancyUsecase) ResolvePrincipalByUsername(context.Context, string)
 
 func (f *fakeTenancyUsecase) SweepExpiredSessions(context.Context) (int64, error) { return 0, nil }
 
+func (f *fakeTenancyUsecase) ChangeOwnPassword(context.Context, int64, string, string) error {
+	return nil
+}
+
 var _ domainTenancy.ITenancyUsecase = (*fakeTenancyUsecase)(nil)
 
 func newAdminUsersTestApp(t *testing.T) (*fiber.App, *fakeTenancyUsecase) {

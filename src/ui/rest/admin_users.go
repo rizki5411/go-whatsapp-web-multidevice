@@ -21,6 +21,10 @@ import (
 // AdminUsersHandler menyajikan rute /admin/users*.
 type AdminUsersHandler struct {
 	Service domainTenancy.ITenancyUsecase
+
+	// Ownership dipakai untuk menampilkan jumlah device terpakai tiap user.
+	// nil-safe: tanpa itu kolomnya sekadar tidak muncul.
+	Ownership domainTenancy.IDeviceOwnership
 }
 
 // InitRestAdminUsers mendaftarkan rute manajemen user.
@@ -29,7 +33,17 @@ type AdminUsersHandler struct {
 // untuk non-admin sehingga operator yang menebak URL tidak mendapat konfirmasi
 // bahwa permukaan ini ada.
 func InitRestAdminUsers(app fiber.Router, service domainTenancy.ITenancyUsecase) *AdminUsersHandler {
-	h := &AdminUsersHandler{Service: service}
+	return InitRestAdminUsersWithOwnership(app, service, nil)
+}
+
+// InitRestAdminUsersWithOwnership mendaftarkan rute manajemen user beserta
+// sumber hitungan device per user.
+func InitRestAdminUsersWithOwnership(
+	app fiber.Router,
+	service domainTenancy.ITenancyUsecase,
+	ownership domainTenancy.IDeviceOwnership,
+) *AdminUsersHandler {
+	h := &AdminUsersHandler{Service: service, Ownership: ownership}
 
 	admin := app.Group("/admin", middleware.RequireAdmin())
 	admin.Get("/users", h.ListUsers)
@@ -84,6 +98,22 @@ func userView(user *domainTenancy.User) map[string]any {
 		"created_at":   user.CreatedAt,
 		"updated_at":   user.UpdatedAt,
 	}
+}
+
+// userViewWithUsage menambahkan jumlah device terpakai.
+//
+// "3 / 5" adalah informasi yang paling sering dibutuhkan admin; tanpa itu
+// device_limit hanya angka buta. Kegagalan membaca hitungannya tidak boleh
+// menggagalkan permintaan — kolomnya cukup dikosongkan.
+func (h *AdminUsersHandler) userViewWithUsage(user *domainTenancy.User) map[string]any {
+	view := userView(user)
+	if view == nil || h.Ownership == nil {
+		return view
+	}
+	if used, err := h.Ownership.DeviceCountByUser(user.ID); err == nil {
+		view["devices_used"] = used
+	}
+	return view
 }
 
 // respondTenancyError menerjemahkan error usecase ke kode HTTP dan kode
@@ -151,7 +181,7 @@ func (h *AdminUsersHandler) ListUsers(c fiber.Ctx) error {
 
 	views := make([]map[string]any, 0, len(users))
 	for _, user := range users {
-		views = append(views, userView(user))
+		views = append(views, h.userViewWithUsage(user))
 	}
 	return c.JSON(utils.ResponseData{
 		Status:  fiber.StatusOK,
@@ -177,7 +207,7 @@ func (h *AdminUsersHandler) GetUser(c fiber.Ctx) error {
 		Status:  fiber.StatusOK,
 		Code:    "SUCCESS",
 		Message: "Detail user",
-		Results: userView(user),
+		Results: h.userViewWithUsage(user),
 	})
 }
 
@@ -204,7 +234,7 @@ func (h *AdminUsersHandler) CreateUser(c fiber.Ctx) error {
 		Status:  fiber.StatusOK,
 		Code:    "SUCCESS",
 		Message: "User dibuat",
-		Results: userView(user),
+		Results: h.userViewWithUsage(user),
 	})
 }
 
@@ -248,7 +278,7 @@ func (h *AdminUsersHandler) UpdateUser(c fiber.Ctx) error {
 		Status:  fiber.StatusOK,
 		Code:    "SUCCESS",
 		Message: message,
-		Results: userView(user),
+		Results: h.userViewWithUsage(user),
 	})
 }
 

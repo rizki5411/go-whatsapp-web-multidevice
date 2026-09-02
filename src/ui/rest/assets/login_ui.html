@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Masuk</title>
+<style>
+  :root {
+    --paper:   #eef1f4;
+    --surface: #ffffff;
+    --sunken:  #f7f9fa;
+    --ink:     #16202b;
+    --muted:   #5e6c7a;
+    --line:    #d3dae1;
+    --line-strong: #b6c1cb;
+    --signal:  #b5540a;
+    --signal-soft: #fdf0e4;
+    --live:    #0f7b6c;
+    --danger:  #a32020;
+    --danger-soft: #fbecec;
+    --focus:   #1c6fd0;
+
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:   #10161d;
+      --surface: #18212b;
+      --sunken:  #131b23;
+      --ink:     #e6ecf2;
+      --muted:   #93a2b1;
+      --line:    #2b3945;
+      --line-strong: #3d4e5d;
+      --signal:  #f0a05a;
+      --signal-soft: #2e2013;
+      --live:    #4fc0ac;
+      --danger:  #e88080;
+      --danger-soft: #2f1a1a;
+      --focus:   #6aa9f0;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 380px;
+    margin: 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 32px 30px 28px;
+  }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 6px;
+  }
+  h1 { font-size: 23px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 24px; font-size: 13.5px; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .field label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  input {
+    font: inherit; font-size: 14px;
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: 6px;
+    padding: 9px 11px; width: 100%;
+  }
+  input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  button {
+    font: inherit; font-size: 14px; font-weight: 620;
+    width: 100%; padding: 10px 14px; margin-top: 4px;
+    border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--surface);
+  }
+  button:hover:not(:disabled) { opacity: .9; }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .msg { font-size: 13px; min-height: 18px; margin: 14px 0 0; color: var(--muted); }
+  .msg.bad { color: var(--danger); }
+  .msg.ok { color: var(--live); }
+
+  .foot {
+    margin: 22px 0 0; padding-top: 18px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--muted);
+  }
+  code {
+    font-family: var(--mono); font-size: 0.9em;
+    background: var(--sunken); border: 1px solid var(--line);
+    border-radius: 3px; padding: 1px 5px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="eyebrow">Konsol internal</p>
+  <h1>Masuk</h1>
+  <p class="lede">Gunakan akun yang dibuatkan admin. Sesi disimpan di cookie dan berlaku sampai kamu keluar.</p>
+
+  <form id="form" novalidate>
+    <div class="field">
+      <label for="u">Username</label>
+      <input id="u" name="username" type="text" autocomplete="username"
+             autocapitalize="none" spellcheck="false" required>
+    </div>
+    <div class="field">
+      <label for="p">Password</label>
+      <input id="p" name="password" type="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" id="go">Masuk</button>
+  </form>
+
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+
+  <p class="foot">
+    Belum punya akun? Minta admin membuatkannya di <code>/custom/users</code>.
+    Kredensial darurat dari <code>APP_BASIC_AUTH</code> tidak bisa dipakai di form ini —
+    kredensial itu masuk lewat prompt HTTP Basic browser, bukan sesi cookie.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Served at {basePath}/custom/login, so strip that suffix to get the API root.
+  // Keeps working when APP_BASE_PATH is set.
+  var API = window.location.pathname.replace(/\/custom\/login\/?$/, "");
+
+  var form = document.getElementById("form");
+  var user = document.getElementById("u");
+  var pass = document.getElementById("p");
+  var go = document.getElementById("go");
+  var msg = document.getElementById("msg");
+
+  function say(text, kind) {
+    msg.textContent = text || "";
+    msg.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  // Tujuan setelah login. HANYA path relatif yang diterima: tanpa penyaringan
+  // ini, ?next=//situs-lain menjadikan halaman login sebagai open redirect yang
+  // tampak berasal dari domain kita sendiri.
+  function safeNext() {
+    var raw = new URLSearchParams(window.location.search).get("next");
+    if (!raw) return API + "/";
+    if (raw.charAt(0) !== "/") return API + "/";
+    if (raw.charAt(1) === "/" || raw.charAt(1) === "\\") return API + "/";
+    return raw;
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var username = user.value.trim();
+    if (!username || !pass.value) {
+      say("Username dan password wajib diisi.", "bad");
+      return;
+    }
+
+    go.disabled = true;
+    say("Memeriksa…");
+
+    fetch(API + "/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ username: username, password: pass.value })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        return { status: r.status, body: body };
+      });
+    }).then(function (res) {
+      if (res.status === 200) {
+        say("Berhasil. Mengalihkan…", "ok");
+        window.location.assign(safeNext());
+        return;
+      }
+      go.disabled = false;
+      pass.value = "";
+      pass.focus();
+
+      if (res.status === 429) {
+        say("Terlalu banyak percobaan. Tunggu beberapa menit lalu coba lagi.", "bad");
+        return;
+      }
+      if (res.status === 404) {
+        say("Login lewat halaman ini tidak aktif di server ini.", "bad");
+        return;
+      }
+      // Pesan yang sama untuk user tidak ada, password salah, dan akun
+      // nonaktif — membedakannya akan membocorkan username mana yang terdaftar.
+      say("Username atau password salah.", "bad");
+    }).catch(function () {
+      go.disabled = false;
+      say("Tidak bisa menghubungi server.", "bad");
+    });
+  });
+
+  user.focus();
+})();
+</script>
+</body>
+</html>

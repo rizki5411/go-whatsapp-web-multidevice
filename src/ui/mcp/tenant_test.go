@@ -76,6 +76,16 @@ func (f *fakeTenantOwnership) Owner(deviceID string) (*domainTenancy.DeviceOwner
 }
 func (f *fakeTenantOwnership) EnsureQuota(*domainTenancy.Principal) error { return nil }
 
+func (f *fakeTenantOwnership) DeviceCountByUser(userID int64) (int, error) {
+	count := 0
+	for _, owner := range f.owners {
+		if owner == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 var _ domainTenancy.IDeviceOwnership = (*fakeTenantOwnership)(nil)
 
 // fakeResolver adalah PrincipalResolver yang dikendalikan test.

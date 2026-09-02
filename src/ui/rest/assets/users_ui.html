@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Manajemen user</title>
+<style>
+  :root {
+    --paper:   #eef1f4;
+    --surface: #ffffff;
+    --sunken:  #f7f9fa;
+    --ink:     #16202b;
+    --muted:   #5e6c7a;
+    --line:    #d3dae1;
+    --line-strong: #b6c1cb;
+    --signal:  #b5540a;
+    --signal-soft: #fdf0e4;
+    --live:    #0f7b6c;
+    --live-soft: #e6f4f1;
+    --danger:  #a32020;
+    --danger-soft: #fbecec;
+    --focus:   #1c6fd0;
+
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:   #10161d;
+      --surface: #18212b;
+      --sunken:  #131b23;
+      --ink:     #e6ecf2;
+      --muted:   #93a2b1;
+      --line:    #2b3945;
+      --line-strong: #3d4e5d;
+      --signal:  #f0a05a;
+      --signal-soft: #2e2013;
+      --live:    #4fc0ac;
+      --live-soft: #14312c;
+      --danger:  #e88080;
+      --danger-soft: #2f1a1a;
+      --focus:   #6aa9f0;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 100px; }
+
+  .eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 6px;
+  }
+  .eyebrow a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+  .eyebrow a:hover { color: var(--ink); }
+
+  h1 { font-size: 27px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 66ch; }
+
+  code {
+    font-family: var(--mono); font-size: 0.9em;
+    background: var(--sunken); border: 1px solid var(--line);
+    border-radius: 3px; padding: 1px 5px;
+  }
+
+  /* --- form tambah user --- */
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 150px; flex: 1; }
+  .field.narrow { min-width: 110px; flex: 0 0 110px; }
+  .field label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  select, input[type=text], input[type=password], input[type=number] {
+    font: inherit; font-size: 14px;
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: 6px;
+    padding: 8px 10px; width: 100%;
+  }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  button {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+    white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: var(--ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { border-color: var(--ink); background: var(--ink); color: var(--surface); padding: 9px 16px; font-size: 13.5px; }
+  button.danger { color: var(--danger); border-color: var(--danger); }
+  button.danger:hover:not(:disabled) { background: var(--danger-soft); }
+  button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  /* --- tabel --- */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 24px;
+  }
+  .panel > header {
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .panel h2 { font-size: 14px; font-weight: 620; margin: 0; }
+  .panel .hint { font-size: 12.5px; color: var(--muted); margin: 0; }
+
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th {
+    text-align: left; font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+    background: var(--sunken); white-space: nowrap;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td.act { text-align: right; white-space: nowrap; }
+  td.act button + button { margin-left: 6px; }
+
+  .who b { display: block; font-weight: 620; }
+  .who small { color: var(--muted); font-size: 12px; }
+  .usage { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .usage.full { color: var(--signal); font-weight: 620; }
+
+  .tag {
+    display: inline-block;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 4px; white-space: nowrap;
+  }
+  .tag.admin    { background: var(--signal-soft); color: var(--signal); }
+  .tag.operator { background: var(--sunken);      color: var(--muted); }
+  .tag.on       { background: var(--live-soft);   color: var(--live); }
+  .tag.off      { background: var(--danger-soft); color: var(--danger); }
+
+  .empty { padding: 34px 18px; text-align: center; color: var(--muted); font-size: 13.5px; }
+  .empty b { display: block; color: var(--ink); font-weight: 620; margin-bottom: 3px; font-size: 14.5px; }
+
+  .msg { font-size: 13px; min-height: 18px; margin: 14px 0 0; color: var(--muted); }
+  .msg.ok { color: var(--live); }
+  .msg.bad { color: var(--danger); }
+
+  .note {
+    margin-top: 26px;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--signal);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .note b { color: var(--ink); font-weight: 620; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow"><a href="../custom">Konsol custom</a> &nbsp;/&nbsp; User</p>
+  <h1>Manajemen user</h1>
+  <p class="lede">
+    Akun aplikasi beserta perannya. <b>Operator</b> hanya melihat device miliknya sendiri;
+    <b>admin</b> melihat semua device dan bisa mengelola user di halaman ini.
+  </p>
+
+  <form class="bar" id="add">
+    <div class="field">
+      <label for="n-user">Username</label>
+      <input id="n-user" type="text" autocapitalize="none" spellcheck="false"
+             placeholder="operator1" required>
+    </div>
+    <div class="field">
+      <label for="n-name">Nama tampilan</label>
+      <input id="n-name" type="text" placeholder="Operator Satu">
+    </div>
+    <div class="field">
+      <label for="n-pass">Password</label>
+      <input id="n-pass" type="password" autocomplete="new-password" required>
+    </div>
+    <div class="field narrow">
+      <label for="n-role">Peran</label>
+      <select id="n-role">
+        <option value="operator">Operator</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <div class="field narrow">
+      <label for="n-limit">Batas device</label>
+      <input id="n-limit" type="number" min="0" step="1" value="0">
+    </div>
+    <button class="primary" type="submit" id="n-go">Tambah user</button>
+  </form>
+
+  <div class="panel">
+    <header>
+      <h2>Daftar user</h2>
+      <p class="hint" id="hint">Memuat…</p>
+    </header>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Peran</th>
+            <th>Device</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty" hidden>
+      <b>Belum ada user</b>
+      Tambahkan akun pertama lewat formulir di atas.
+    </div>
+  </div>
+
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+
+  <p class="note">
+    <b>Batas device 0</b> berarti tanpa batas. <b>Menghapus user tidak menghapus device-nya:</b>
+    device itu menjadi tanpa pemilik dan hanya terlihat admin, sampai ditetapkan lagi
+    di <a href="devices">/custom/devices</a>. Mengganti password atau menonaktifkan user
+    langsung mencabut seluruh sesinya.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Served at {basePath}/custom/users, so strip that suffix to get the API root.
+  var API = window.location.pathname.replace(/\/custom\/users\/?$/, "");
+
+  var el = function (id) { return document.getElementById(id); };
+  var rows = el("rows"), empty = el("empty"), hint = el("hint"), msg = el("msg");
+  var form = el("add");
+
+  var state = { users: [], busy: false };
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    opts.headers = Object.assign({ "Accept": "application/json" }, opts.headers || {});
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        return { status: r.status, body: body };
+      });
+    });
+  }
+
+  function say(text, kind) {
+    msg.textContent = text || "";
+    msg.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // Pesan server sudah dalam bahasa yang benar dan menjelaskan aturannya
+  // (misalnya invarian admin terakhir), jadi ditampilkan apa adanya alih-alih
+  // diterjemahkan ulang di sini — dua sumber kebenaran akan menyimpang.
+  function fail(res, fallback) {
+    say((res.body && res.body.message) || fallback, "bad");
+  }
+
+  function usageCell(u) {
+    var used = (typeof u.devices_used === "number") ? u.devices_used : null;
+    var limit = u.device_limit || 0;
+    var text = (used === null ? "?" : used) + " / " + (limit === 0 ? "∞" : limit);
+    var full = limit > 0 && used !== null && used >= limit;
+    return '<td class="usage' + (full ? " full" : "") + '">' + esc(text) + "</td>";
+  }
+
+  function render() {
+    var users = state.users;
+    hint.textContent = users.length + " user";
+    empty.hidden = users.length > 0;
+
+    rows.innerHTML = users.map(function (u) {
+      var role = u.role === "admin" ? "admin" : "operator";
+      return "<tr>" +
+        '<td class="who"><b>' + esc(u.username) + "</b>" +
+          (u.display_name ? "<small>" + esc(u.display_name) + "</small>" : "") + "</td>" +
+        '<td><span class="tag ' + role + '">' + esc(role) + "</span></td>" +
+        usageCell(u) +
+        '<td><span class="tag ' + (u.active ? "on" : "off") + '">' +
+          (u.active ? "Aktif" : "Nonaktif") + "</span></td>" +
+        '<td class="act">' +
+          '<button data-pass="' + esc(u.id) + '">Reset password</button>' +
+          '<button data-toggle="' + esc(u.id) + '">' + (u.active ? "Nonaktifkan" : "Aktifkan") + "</button>" +
+          '<button class="danger" data-del="' + esc(u.id) + '">Hapus</button>' +
+        "</td>" +
+      "</tr>";
+    }).join("");
+  }
+
+  function load() {
+    return api("/admin/users").then(function (res) {
+      if (res.status !== 200) {
+        hint.textContent = "gagal memuat";
+        fail(res, "Gagal memuat daftar user.");
+        return;
+      }
+      state.users = res.body.results || [];
+      render();
+    });
+  }
+
+  function patch(id, payload, okText) {
+    if (state.busy) return;
+    state.busy = true;
+    say("Menyimpan…");
+    api("/admin/users/" + encodeURIComponent(id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      state.busy = false;
+      if (res.status !== 200) { fail(res, "Gagal menyimpan."); return; }
+      say((res.body && res.body.message) || okText, "ok");
+      load();
+    }).catch(function () {
+      state.busy = false;
+      say("Tidak bisa menghubungi server.", "bad");
+    });
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var payload = {
+      username: el("n-user").value.trim(),
+      display_name: el("n-name").value.trim(),
+      password: el("n-pass").value,
+      role: el("n-role").value,
+      device_limit: parseInt(el("n-limit").value, 10) || 0
+    };
+    if (!payload.username || !payload.password) {
+      say("Username dan password wajib diisi.", "bad");
+      return;
+    }
+
+    el("n-go").disabled = true;
+    say("Menambahkan…");
+    api("/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      el("n-go").disabled = false;
+      if (res.status !== 200) { fail(res, "Gagal menambahkan user."); return; }
+      say("User " + payload.username + " dibuat.", "ok");
+      el("n-user").value = "";
+      el("n-name").value = "";
+      el("n-pass").value = "";
+      el("n-limit").value = "0";
+      load();
+    }).catch(function () {
+      el("n-go").disabled = false;
+      say("Tidak bisa menghubungi server.", "bad");
+    });
+  });
+
+  rows.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+
+    var id = btn.getAttribute("data-pass");
+    if (id) {
+      var next = window.prompt("Password baru (minimal 8 karakter):");
+      if (next === null) return;
+      if (next.length < 8) { say("Password minimal 8 karakter.", "bad"); return; }
+      patch(id, { password: next }, "Password diganti.");
+      return;
+    }
+
+    id = btn.getAttribute("data-toggle");
+    if (id) {
+      var user = state.users.filter(function (u) { return String(u.id) === String(id); })[0];
+      if (!user) return;
+      patch(id, { active: !user.active }, user.active ? "User dinonaktifkan." : "User diaktifkan.");
+      return;
+    }
+
+    id = btn.getAttribute("data-del");
+    if (id) {
+      var target = state.users.filter(function (u) { return String(u.id) === String(id); })[0];
+      var name = target ? target.username : id;
+      // Nasib device-nya disebut eksplisit: perilakunya benar, tapi mengejutkan
+      // kalau tidak diberitahu lebih dulu.
+      if (!window.confirm(
+        "Hapus user " + name + "?\n\n" +
+        "Device miliknya TIDAK dihapus — device itu menjadi tanpa pemilik dan " +
+        "hanya terlihat oleh admin sampai pemiliknya ditetapkan lagi."
+      )) return;
+
+      say("Menghapus…");
+      api("/admin/users/" + encodeURIComponent(id), { method: "DELETE" }).then(function (res) {
+        if (res.status !== 200) { fail(res, "Gagal menghapus user."); return; }
+        say((res.body && res.body.message) || "User dihapus.", "ok");
+        load();
+      }).catch(function () { say("Tidak bisa menghubungi server.", "bad"); });
+    }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

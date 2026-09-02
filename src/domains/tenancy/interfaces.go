@@ -97,6 +97,14 @@ type ITenancyUsecase interface {
 
 	// SweepExpiredSessions menghapus session yang sudah kedaluwarsa.
 	SweepExpiredSessions(ctx context.Context) (int64, error)
+
+	// ChangeOwnPassword mengganti password user sendiri.
+	//
+	// currentPassword WAJIB diverifikasi meski pemanggil sudah terautentikasi:
+	// cookie yang dicuri tidak boleh cukup untuk mengambil alih akun secara
+	// permanen. Seluruh session user dicabut setelahnya, dan pemanggil harus
+	// menerbitkan session baru untuk request yang sedang berjalan.
+	ChangeOwnPassword(ctx context.Context, userID int64, currentPassword, newPassword string) error
 }
 
 // ITenancyRepository adalah kontrak persistensi untuk akun aplikasi,
@@ -207,4 +215,10 @@ type IDeviceOwnership interface {
 	// EnsureQuota mengembalikan error kalau principal sudah mencapai
 	// device_limit-nya. Limit 0 berarti tanpa batas.
 	EnsureQuota(p *Principal) error
+
+	// DeviceCountByUser menghitung device milik satu user tertentu.
+	//
+	// Berbeda dari OwnedDeviceIDs yang bekerja atas principal pemanggil: ini
+	// dipakai halaman admin untuk menampilkan "terpakai / limit" tiap user.
+	DeviceCountByUser(userID int64) (int, error)
 }
