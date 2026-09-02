@@ -45,6 +45,7 @@ func init() {
 func restServer(_ *cobra.Command, _ []string) {
 	// registerMcpOAuth depends on these values being loaded after flag parsing.
 	loadMcpOAuthEnvConfig()
+	loadMultiTenantEnvConfig()
 	fiberConfig := fiber.Config{
 		TrustProxy: true,
 		BodyLimit:  int(config.WhatsappSettingMaxVideoSize),
