@@ -266,7 +266,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 | [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ✅ |
 | [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ✅ |
 | [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ✅ |
-| [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ⬜ |
+| [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ✅ |
 | [08](phase-08-ui-operator.md) | UI operator: login, `/custom/users` | 03 (idealnya 05) | ya | ⬜ |
 | [09](phase-09-verifikasi-rollout.md) | Verifikasi end-to-end, dokumentasi, rollout | semua | ya | ⬜ |
 
@@ -311,6 +311,62 @@ src/
 ```
 
 ---
+
+---
+
+## Hasil audit Fase 07
+
+Inventaris lengkap seluruh permukaan, dijalankan di Fase 07. Setiap baris
+terklasifikasi; tidak ada yang berstatus "belum diperiksa".
+
+### Iterasi seluruh registry device
+
+| Lokasi | Status |
+|--------|--------|
+| `ui/rest/device.go` → `ListDevices` | difilter (Fase 04) |
+| `ui/rest/app.go` → `FetchDevices` | difilter (Fase 04) |
+| `ui/websocket/websocket.go` → `FETCH_DEVICES` | difilter + hanya ke peminta (Fase 06) |
+| `usecase/app.go` → `Logout` | daftar device hanya di mode single-tenant (Fase 06) |
+| `usecase/device.go` → `LogoutDevice` | idem |
+| `usecase/device.go` → `ListDevices` | difilter di handler (Fase 04) |
+| `infrastructure/whatsapp/message_queue_worker.go` | **tidak perlu guard** — worker, device ditentukan baris `message_queue` yang hanya bisa dibuat lewat endpoint ber-guard |
+| `infrastructure/whatsapp/presence_pulse.go` | **tidak perlu guard** — worker per device instance |
+| `ui/rest/helpers/common.go` → `SetAutoConnectAfterBooting` | **tidak perlu guard** — tugas startup, menyambungkan ulang semua device tanpa pemanggil HTTP |
+| `infrastructure/whatsapp/device_manager.go` → `LoadExistingDevices` | pemuatan startup |
+
+### Config lintas device
+
+`GET /command/configs` dan `GET /chatwoot/configs` difilter (Fase 05).
+
+### Permukaan non-HTTP
+
+Dikonfirmasi **tidak** butuh guard: worker antrian, presence pulse, command
+handler `!`, forward webhook, dan Chatwoot sync service. Batas tenant ada di
+pintu masuk (HTTP/MCP/WebSocket), bukan di eksekusi. Menambahkan guard di sana
+justru akan mematikan worker, karena mereka tidak punya principal.
+
+### Statistik global
+
+`GetTotalMessageCount`, `GetTotalChatCount`, dan `GetStorageStatistics` hanya
+dipakai internal untuk logging saat truncate. **Tidak ada endpoint REST yang
+mengeksposnya**, jadi tidak ada kebocoran volume antar tenant.
+
+### Rute publik (di luar auth gate)
+
+| Rute | Status |
+|------|--------|
+| `GET /health` | aman — hanya mengembalikan `OK` / `Service Unavailable`, tanpa data tenant |
+| `POST {webhookPath}` dan `POST {webhookPath}/:device_id` | sengaja publik; wajib `CHATWOOT_WEBHOOK_SECRET` (ada peringatan startup) |
+| Rute discovery/token OAuth MCP | sengaja publik |
+| `POST /auth/login`, `POST /auth/logout` | sengaja publik |
+
+### Dead code yang perlu diawasi
+
+`serviceApp.FirstDevice` mengembalikan device PERTAMA di registry global. Saat
+audit ini **tidak ada pemanggilnya** — hanya deklarasi interface dan
+implementasinya — jadi bukan kebocoran aktif. Tapi kalau nanti ada handler yang
+memakainya, ia akan mengembalikan device milik siapa pun. Periksa ulang setiap
+sync upstream.
 
 ## Glosarium
 

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -105,14 +106,7 @@ func registerMcpOAuth(app *fiber.App, dm *whatsapp.DeviceManager) (*mcpoauth.Ser
 		mcpRouter = app.Group(config.AppBasePath)
 	}
 	useMcpOAuthMiddleware(mcpRouter, oauthServer.MCPAuthMiddleware(validateCredential))
-	uimcp.Register(mcpRouter, dm, uimcp.Deps{
-		App:     appUsecase,
-		Send:    sendUsecase,
-		Chat:    chatUsecase,
-		User:    userUsecase,
-		Message: messageUsecase,
-		Group:   groupUsecase,
-	})
+	uimcp.Register(mcpRouter, dm, mcpDeps())
 
 	return oauthServer, true, nil
 }
@@ -125,7 +119,9 @@ func useMcpOAuthMiddleware(router fiber.Router, auth fiber.Handler) {
 }
 
 func mcpOAuthCredentialValidator(credentials []string) (mcpoauth.CredentialValidator, error) {
-	if len(credentials) == 0 {
+	// Di mode multi-tenant user bisa seluruhnya berasal dari database, jadi
+	// APP_BASIC_AUTH yang kosong bukan lagi kesalahan konfigurasi.
+	if len(credentials) == 0 && tenancyUsecase == nil {
 		return nil, errors.New("MCP OAuth requires APP_BASIC_AUTH credentials")
 	}
 	accounts := make(map[string]string, len(credentials))
@@ -136,6 +132,19 @@ func mcpOAuthCredentialValidator(credentials []string) (mcpoauth.CredentialValid
 		}
 		accounts[parts[0]] = parts[1]
 	}
+
+	// Mode multi-tenant memvalidasi ke app_user lewat ResolveBasic, yang sudah
+	// mencakup aturan break-glass APP_BASIC_AUTH. Validator env di bawah TIDAK
+	// ikut dipakai: menumpuk keduanya akan membuat password env tetap berlaku
+	// untuk username yang sudah ada di app_user — persis kebalikan dari K6.
+	if tenancyUsecase != nil {
+		usecase := tenancyUsecase
+		return func(username, password string) bool {
+			principal, err := usecase.ResolveBasic(context.Background(), username, password)
+			return err == nil && principal != nil
+		}, nil
+	}
+
 	return func(username, password string) bool {
 		expected, ok := accounts[username]
 		if !ok {
