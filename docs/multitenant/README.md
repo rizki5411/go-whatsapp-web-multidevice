@@ -173,7 +173,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 | Fase | Judul | Tergantung | Aman deploy? | Status |
 |------|-------|-----------|--------------|--------|
 | [00](phase-00-fondasi.md) | Fondasi, feature flag, baseline | — | ya (no-op) | ✅ |
-| [01](phase-01-skema-repository.md) | Skema DB, domain, repository tenancy | 00 | ya (tabel kosong) | ⬜ |
+| [01](phase-01-skema-repository.md) | Skema DB, domain, repository tenancy | 00 | ya (tabel kosong) | ✅ |
 | [02](phase-02-user-management.md) | User management + bootstrap admin | 01 | ya | ⬜ |
 | [03](phase-03-auth-session.md) | Auth gate: session cookie + Basic dari DB | 02 | ya | ⬜ |
 | [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ⬜ |

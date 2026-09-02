@@ -2899,5 +2899,58 @@ func (r *SQLiteRepository) getMigrations() []string {
 		// device's WhatsApp status. Defaults to 0 so devices configured before this
 		// column existed do not start posting statuses on upgrade.
 		`ALTER TABLE device_command_config ADD COLUMN status_enabled BOOLEAN NOT NULL DEFAULT 0`,
+
+		// Migration 55: Akun aplikasi untuk mode multi-tenant (fitur fork).
+		// Tabel ini tetap kosong selama MULTI_TENANT_ENABLED=false; sampai admin
+		// pertama di-seed, kredensial APP_BASIC_AUTH masih satu-satunya jalan
+		// masuk. device_limit 0 berarti tanpa batas. password_hash adalah bcrypt;
+		// baris dengan hash kosong tidak bisa login.
+		`CREATE TABLE IF NOT EXISTS app_user (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username VARCHAR(64) NOT NULL,
+			password_hash VARCHAR(255) NOT NULL DEFAULT '',
+			display_name VARCHAR(255) NOT NULL DEFAULT '',
+			role VARCHAR(16) NOT NULL DEFAULT 'operator',
+			device_limit INTEGER NOT NULL DEFAULT 0,
+			active BOOLEAN NOT NULL DEFAULT 1,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Migration 56: Username adalah identitas login, harus unik. Nilainya
+		// selalu disimpan lowercase-trimmed (tenancy.NormalizeUsername), jadi
+		// index ini sekaligus mencegah dua akun yang cuma beda kapitalisasi.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_username ON app_user(username)`,
+		// Migration 57: Kepemilikan device slot. Tabel terpisah, bukan kolom baru
+		// di tabel devices: devices milik upstream, dan ALTER di sana menaikkan
+		// risiko konflik migration saat sync. Satu device dimiliki satu user;
+		// device tanpa baris di sini dianggap belum di-klaim dan hanya bisa
+		// diakses admin. device_id adalah id slot device (seperti
+		// device_command_config), bukan JID: itu identitas yang dipakai pemanggil
+		// lewat X-Device-Id, dan bertahan melewati logout/re-login.
+		`CREATE TABLE IF NOT EXISTS device_owner (
+			device_id VARCHAR(255) PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Migration 58: Daftar device milik satu user dibaca tiap kali daftar
+		// device difilter dan tiap kali fallback device dicari.
+		`CREATE INDEX IF NOT EXISTS idx_device_owner_user ON device_owner(user_id)`,
+		// Migration 59: Session login berbasis cookie. Yang disimpan adalah
+		// SHA-256 dari token, bukan tokennya: dump DB tidak boleh cukup untuk
+		// membajak session yang masih hidup. Pola yang sama dipakai
+		// ui/mcp/oauth/store.go (hashSecret).
+		`CREATE TABLE IF NOT EXISTS user_session (
+			token_hash VARCHAR(64) PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			user_agent VARCHAR(255) NOT NULL DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP NOT NULL
+		)`,
+		// Migration 60: Cabut semua session satu user sekaligus (ganti password,
+		// nonaktifkan user, hapus user) tanpa full scan.
+		`CREATE INDEX IF NOT EXISTS idx_user_session_user ON user_session(user_id)`,
+		// Migration 61: Sapu session kedaluwarsa secara berkala.
+		`CREATE INDEX IF NOT EXISTS idx_user_session_expires ON user_session(expires_at)`,
 	}
 }
