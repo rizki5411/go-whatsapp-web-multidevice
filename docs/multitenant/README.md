@@ -210,6 +210,38 @@ Perilaku upstream. Konsekuensi setelah Fase 04: koneksi juga melewati
 Untuk menguji WebSocket, sertakan `device_id`; tanpa itu yang terlihat hanya
 kegagalan upgrade dan mudah disalahartikan sebagai kegagalan autentikasi.
 
+Konsekuensi operasionalnya, bukan hanya konsekuensi pengujian: **operator yang
+belum punya device sama sekali tidak bisa membuka `/ws`**. Akun operator yang
+baru dibuat karena itu tidak menerima event realtime apa pun sampai device
+pertamanya dibuat. Diverifikasi saat review Fase 06.
+
+### Principal koneksi WebSocket dibekukan saat upgrade
+
+Ditemukan saat review Fase 06, setelah fase itu ditandai selesai.
+
+`fiber.Ctx` tidak hidup lagi setelah upgrade, jadi principal disalin sekali ke
+`Clients` dan dipakai apa adanya untuk setiap keputusan `mayReceive`. Memvalidasi
+ulang per pesan berarti satu query per pesan per koneksi di dalam loop hub, jadi
+itu bukan pilihan.
+
+Akibatnya pencabutan hak tidak berlaku pada koneksi yang sudah terbuka, dan
+koneksi WebSocket berumur sangat panjang. Yang terukur saat review: admin yang
+diturunkan jadi operator tetap menerima event seluruh tenant dan tetap mendapat
+daftar device lengkap dari `FETCH_DEVICES`, padahal HTTP-nya sudah benar
+seketika (`/admin/users` → 404, `/devices` → `[]`). Akun yang dinonaktifkan pun
+tetap menerima event meski HTTP-nya sudah 401.
+
+Perbaikannya: channel `websocket.Revoke` yang dilayani `RunHub`, dan
+`usecase.revokeWebsocketSessions` memanggilnya dari `UpdateUser` (role berubah,
+akun dinonaktifkan, password diganti admin) dan `DeleteUser`. Koneksinya
+**diputus**, bukan divalidasi ulang — klien menyambung ulang dan `AuthGate` serta
+`DeviceOwnerGuard` yang memutuskan, sehingga penegakan haknya tetap di satu
+tempat.
+
+Kepemilikan device tidak perlu ikut dicabut: `mayReceive` membaca
+`ownership.CanAccess` setiap kali, jadi pemindahan device sudah berlaku seketika
+pada koneksi yang terbuka — ini diverifikasi terpisah.
+
 ### Dua jebakan UI yang hanya terlihat di browser sungguhan
 
 Ditemukan saat verifikasi Fase 08; keduanya lolos dari unit test.
@@ -254,6 +286,18 @@ Konsekuensinya, DoD Fase 06 yang mensyaratkan `go test -race ./ui/websocket/...`
 - catat di PR bahwa race detector tidak dijalankan beserta alasannya.
 
 Jangan menandai DoD `-race` sebagai lulus tanpa benar-benar menjalankannya.
+
+**Docker menutup celah ini** — dipakai sejak review Fase 06, dan lebih murah
+daripada memasang gcc:
+
+```bash
+export MSYS_NO_PATHCONV=1   # dari Git Bash, sebelum argumen yang diawali "/"
+docker run --rm -v "$PWD/src:/app" -w /app -e CGO_ENABLED=1 golang:1.26   sh -c 'go test -race ./ui/websocket/... ./usecase/...'
+```
+
+Bonus: di dalam container cgo tersedia, jadi test `usecase` dan
+`infrastructure/chatstorage` yang meng-hardcode driver `sqlite3` ikut hijau —
+lihat tabel di "Baseline lingkungan".
 
 ### Rute yang tidak terdaftar TIDAK menjawab 404
 

@@ -283,13 +283,25 @@ sekarang, supaya gowa-ui di mode single-tenant tidak berubah perilakunya.
       bahwa tidak ada `websocket.BroadcastMessage{` tanpa `DeviceID` di luar
       test.
 - [ ] Flag on, dua operator terhubung bersamaan:
-      - QR device A hanya muncul di koneksi operator A
-      - event pesan masuk device B hanya muncul di koneksi operator B
+      - **Koreksi (review Fase 06):** QR dan pesan masuk TIDAK disiarkan lewat
+        WebSocket di fork ini. QR dikirim lewat respons HTTP
+        `/devices/:id/login` (`src/usecase/app.go`), dan tidak ada satu pun dari
+        sembilan titik broadcast yang berisi pesan masuk. Dua baris di bawah
+        karena itu tidak bisa diuji apa adanya — jangan menandainya lulus.
+      - Gantinya, pakai event yang memang ada: `DEVICE_LOGGED_OUT` dan
+        `DEVICE_WEBHOOK_CONFIG_UPDATED` untuk device A vs device B.
+      - ~~QR device A hanya muncul di koneksi operator A~~
+      - ~~event pesan masuk device B hanya muncul di koneksi operator B~~
       - admin melihat keduanya
 - [ ] `FETCH_DEVICES` dari operator A hanya mengembalikan device A, dan **hanya
       terkirim ke koneksi A** (koneksi B tidak menerima apa pun).
 - [ ] Payload `DEVICE_LOGGED_OUT` tidak lagi memuat daftar device orang lain.
 - [ ] Koneksi tanpa principal (kalau bisa terjadi) tidak menerima apa pun.
+- [ ] Pencabutan hak berlaku pada koneksi yang SUDAH terbuka: turunkan role atau
+      nonaktifkan akun selagi koneksinya hidup, lalu pastikan koneksinya putus.
+      Ditambahkan setelah review Fase 06 menemukan principal koneksi dibekukan
+      saat upgrade; lihat "Principal koneksi WebSocket dibekukan saat upgrade"
+      di `README.md`.
 - [ ] `git diff --stat src/ui/websocket/websocket.go` — perubahan terukur, bukan
       penulisan ulang file.
 

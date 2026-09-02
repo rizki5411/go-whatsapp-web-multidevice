@@ -140,6 +140,25 @@ Ya, seketika. Mengganti password atau menonaktifkan user langsung mencabut
 seluruh session-nya **dan** membatalkan cache verifikasi Basic Auth. Tidak ada
 jeda.
 
+Koneksi WebSocket yang sedang terbuka ikut **diputus** — begitu juga saat role
+diturunkan atau user dihapus. Itu memang terlihat: dashboard yang sedang
+terbuka kehilangan koneksi realtime-nya dan menyambung ulang (kalau haknya
+memang sudah dicabut, penyambungan ulangnya ditolak). Tanpa pemutusan itu,
+koneksi lama akan terus menerima event dengan hak lamanya selama tab-nya
+terbuka.
+
+Yang **tidak** memutus koneksi: mengganti nama tampilan, mengubah
+`device_limit`, dan mengganti password sendiri lewat tombol "Ganti password"
+(yang terakhir sengaja — supaya Anda tidak menendang diri sendiri dari
+perangkat yang sedang dipakai).
+
+### Operator baru tidak menerima event realtime?
+
+Selama akun itu belum punya device sama sekali, koneksi WebSocket-nya memang
+ditolak: endpoint `/ws` menuntut device yang bisa diresolve dan dimiliki
+pemanggilnya. Begitu device pertamanya dibuat, koneksinya normal. Bukan masalah
+kredensial.
+
 ### Saya terkunci. Bagaimana masuk lagi?
 
 Jalur darurat (*break-glass*): kredensial di `APP_BASIC_AUTH` yang
@@ -219,7 +238,13 @@ terpisah.
 endpoint REST yang mengeksposnya (diverifikasi di audit fase 07), jadi belum
 menjadi kebocoran. Kalau nanti ditambahkan, batasi ke admin.
 
-**7. `serviceApp.FirstDevice` mengembalikan device pertama registry global.**
+**7. Perubahan kepemilikan device tidak memutus koneksi WebSocket** — dan memang
+tidak perlu: hub memeriksa kepemilikan pada setiap event, jadi device yang
+dipindahkan langsung berhenti terkirim ke pemilik lama. Yang diperiksa sekali
+saja adalah identitas pemiliknya (role dan status aktif), dan itu ditangani
+lewat pemutusan koneksi di atas.
+
+**8. `serviceApp.FirstDevice` mengembalikan device pertama registry global.**
 Saat ini **tidak ada pemanggilnya**, jadi bukan kebocoran aktif. Tapi kalau
 nanti ada handler yang memakainya, ia akan mengembalikan device milik siapa pun.
 Periksa setiap sync upstream.

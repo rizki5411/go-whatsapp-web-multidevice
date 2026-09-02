@@ -3,6 +3,7 @@ package websocket
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainApp "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
@@ -283,5 +284,142 @@ func TestHandleRegisterKeepsPrincipal(t *testing.T) {
 	handleUnregister(nil)
 	if _, ok := Clients[nil]; ok {
 		t.Fatal("koneksi tidak terhapus")
+	}
+}
+
+// _____________________________________________________________________________
+// Pencabutan
+
+// withClients memasang isi Clients untuk satu kasus uji lalu memulihkannya.
+func withClients(t *testing.T, entries map[*websocket.Conn]client) {
+	t.Helper()
+	prev := Clients
+	Clients = entries
+	t.Cleanup(func() { Clients = prev })
+}
+
+// TestConnsOfUserSelectsOnlyThatUser mengunci inti perbaikan: principal koneksi
+// dibekukan saat upgrade, jadi pencabutan hak harus memutus koneksinya — dan
+// HANYA koneksi milik user yang haknya berubah.
+func TestConnsOfUserSelectsOnlyThatUser(t *testing.T) {
+	korban1, korban2 := &websocket.Conn{}, &websocket.Conn{}
+	lain, tanpaIdentitas := &websocket.Conn{}, &websocket.Conn{}
+
+	withClients(t, map[*websocket.Conn]client{
+		korban1:        {principal: &domainTenancy.Principal{UserID: 7, Role: domainTenancy.RoleOperator}},
+		korban2:        {principal: &domainTenancy.Principal{UserID: 7, Role: domainTenancy.RoleAdmin}},
+		lain:           {principal: &domainTenancy.Principal{UserID: 8, Role: domainTenancy.RoleOperator}},
+		tanpaIdentitas: {},
+	})
+
+	targets := connsOfUser(7)
+	if len(targets) != 2 {
+		t.Fatalf("connsOfUser(7) mengembalikan %d koneksi, want 2", len(targets))
+	}
+	for _, conn := range targets {
+		if conn == lain || conn == tanpaIdentitas {
+			t.Fatal("koneksi milik user lain ikut terpilih")
+		}
+	}
+
+	// UserID 0 adalah principal break-glass dan koneksi tanpa identitas; tidak
+	// boleh ada yang terpilih atasnya, kalau tidak "hapus user" akan memutus
+	// koneksi yang tidak terkait.
+	if got := connsOfUser(0); len(got) != 0 {
+		t.Fatalf("connsOfUser(0) mengembalikan %d koneksi, want 0", len(got))
+	}
+}
+
+// TestRevokeUserPublishesToHub: titik panggil di usecase mengandalkan ini, dan
+// pencabutan yang tidak pernah sampai ke hub gagal secara senyap.
+func TestRevokeUserPublishesToHub(t *testing.T) {
+	prev := Revoke
+	Revoke = make(chan int64, 4)
+	t.Cleanup(func() { Revoke = prev })
+
+	RevokeUser(7)
+	select {
+	case got := <-Revoke:
+		if got != 7 {
+			t.Fatalf("menerima user %d, want 7", got)
+		}
+	default:
+		t.Fatal("tidak ada pencabutan yang dikirim ke hub")
+	}
+
+	// Break-glass tidak punya baris app_user; mencabut atasnya akan memutus
+	// koneksi yang tidak ada hubungannya.
+	RevokeUser(0)
+	select {
+	case got := <-Revoke:
+		t.Fatalf("user 0 tidak boleh dikirim, dapat %d", got)
+	default:
+	}
+}
+
+// TestRevokeUserDoesNotBlockWhenHubIsBusy: pemanggilnya adalah handler HTTP
+// admin, dan hub bisa tertahan menulis ke koneksi yang lambat.
+func TestRevokeUserDoesNotBlockWhenHubIsBusy(t *testing.T) {
+	prev := Revoke
+	Revoke = make(chan int64) // tanpa buffer, tanpa hub: pengiriman langsung pasti gagal
+	t.Cleanup(func() { Revoke = prev })
+
+	selesai := make(chan struct{})
+	go func() {
+		RevokeUser(7)
+		close(selesai)
+	}()
+
+	select {
+	case <-selesai:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RevokeUser memblokir saat hub sibuk")
+	}
+
+	// Pesannya tidak boleh hilang: ia harus tetap tiba begitu hub siap.
+	select {
+	case got := <-Revoke:
+		if got != 7 {
+			t.Fatalf("menerima user %d, want 7", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pencabutan hilang, bukan tertunda")
+	}
+}
+
+// _____________________________________________________________________________
+// Daur ulang pointer koneksi
+
+// TestWriteToRejectsRecycledConnection: contrib mengembalikan *websocket.Conn ke
+// sync.Pool, jadi koneksi berikutnya bisa mewarisi pointer yang sama. Balasan
+// yang masih menunggu di buffer Direct tidak boleh tertulis ke koneksi itu.
+func TestWriteToRejectsRecycledConnection(t *testing.T) {
+	conn := &websocket.Conn{}
+	withClients(t, map[*websocket.Conn]client{
+		// Registrasi BARU (seq 2) di atas pointer yang sama.
+		conn: {principal: &domainTenancy.Principal{UserID: 8, Role: domainTenancy.RoleOperator}, seq: 2},
+	})
+
+	// Pesan milik registrasi LAMA (seq 1). Tanpa pemeriksaan seq, writeTo akan
+	// mencoba menulisnya ke registrasi baru; penulisan itu gagal (Conn ini tidak
+	// punya koneksi jaringan di baliknya) sehingga writeTo menutup koneksinya
+	// dan membuangnya dari Clients. Entri yang masih utuh setelahnya adalah
+	// bukti pesan itu memang tidak pernah dikirim.
+	writeTo(conn, 1, BroadcastMessage{Code: "LIST_DEVICES"})
+
+	cl, ok := Clients[conn]
+	if !ok {
+		t.Fatal("registrasi baru ikut tertutup oleh pesan milik registrasi lama")
+	}
+	if cl.principal == nil || cl.principal.UserID != 8 {
+		t.Fatalf("registrasi baru berubah: %+v", cl.principal)
+	}
+
+	// Kontrol positif: dengan seq yang cocok, pesannya memang diproses —
+	// penulisannya gagal dan koneksinya dibuang, jadi test di atas tidak lulus
+	// hanya karena writeTo tidak pernah menulis apa pun.
+	writeTo(conn, 2, BroadcastMessage{Code: "LIST_DEVICES"})
+	if _, ok := Clients[conn]; ok {
+		t.Fatal("seq yang cocok seharusnya diproses")
 	}
 }
