@@ -10,6 +10,7 @@ import (
 	"time"
 
 	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/middleware"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -113,9 +114,31 @@ func (f *fakeTenancyUsecase) Authenticate(context.Context, string, string) (*dom
 	return nil, nil
 }
 
-func (f *fakeTenancyUsecase) BootstrapAdminsFromEnv(context.Context, []string) (int, error) {
+func (f *fakeTenancyUsecase) BootstrapAdminsFromEnv(context.Context) (int, error) {
 	return 0, nil
 }
+
+// Method berikut dipakai jalur auth (fase 03) dan tidak relevan untuk test
+// handler admin; fakeAuthUsecase di auth_test.go yang menggantikannya.
+func (f *fakeTenancyUsecase) Login(context.Context, string, string, string) (string, *domainTenancy.Principal, error) {
+	return "", nil, nil
+}
+
+func (f *fakeTenancyUsecase) Logout(context.Context, string) error { return nil }
+
+func (f *fakeTenancyUsecase) ResolveSession(context.Context, string) (*domainTenancy.Principal, error) {
+	return nil, nil
+}
+
+func (f *fakeTenancyUsecase) ResolveBasic(context.Context, string, string) (*domainTenancy.Principal, error) {
+	return nil, nil
+}
+
+func (f *fakeTenancyUsecase) ResolvePrincipalByUsername(context.Context, string) (*domainTenancy.Principal, error) {
+	return nil, nil
+}
+
+func (f *fakeTenancyUsecase) SweepExpiredSessions(context.Context) (int64, error) { return 0, nil }
 
 var _ domainTenancy.ITenancyUsecase = (*fakeTenancyUsecase)(nil)
 
@@ -324,5 +347,69 @@ func TestAdminUsersDeleteExplainsDeviceFate(t *testing.T) {
 	}
 	if _, ok := svc.users[1]; ok {
 		t.Fatal("user harus terhapus")
+	}
+}
+
+// newAdminUsersGuardedApp membangun app dengan principal tertentu, untuk
+// memastikan RequireAdmin benar-benar terpasang di rute /admin/users.
+//
+// Test lain di file ini berjalan dengan flag mati, di mana RequireAdmin
+// meneruskan semuanya — jadi tanpa test ini pemasangan guard-nya tidak pernah
+// benar-benar terbukti.
+func newAdminUsersGuardedApp(t *testing.T, principal *domainTenancy.Principal) *fiber.App {
+	t.Helper()
+
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		if principal != nil {
+			middleware.StorePrincipal(c, principal)
+		}
+		return c.Next()
+	})
+	InitRestAdminUsers(app, newFakeTenancyUsecase())
+	return app
+}
+
+func TestAdminUsersRequireAdminIsWired(t *testing.T) {
+	enableMultiTenantForTest(t, true)
+
+	paths := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/admin/users", ""},
+		{http.MethodPost, "/admin/users", `{"username":"x","password":"rahasia123"}`},
+		{http.MethodGet, "/admin/users/1", ""},
+		{http.MethodPatch, "/admin/users/1", `{"display_name":"x"}`},
+		{http.MethodDelete, "/admin/users/1", ""},
+	}
+
+	// Operator harus melihat 404 di SEMUA rute admin — 404 dan bukan 403,
+	// supaya keberadaan permukaan admin tidak terkonfirmasi.
+	operatorApp := newAdminUsersGuardedApp(t, &domainTenancy.Principal{
+		UserID: 2, Username: "operator1", Role: domainTenancy.RoleOperator,
+	})
+	for _, tc := range paths {
+		res, body := doJSON(t, operatorApp, tc.method, tc.path, tc.body)
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s %s sebagai operator: status = %d, want 404 (body %s)", tc.method, tc.path, res.StatusCode, body)
+		}
+	}
+
+	// Tanpa principal pun harus tertutup.
+	anonApp := newAdminUsersGuardedApp(t, nil)
+	res, body := doJSON(t, anonApp, http.MethodGet, "/admin/users", "")
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("tanpa principal: status = %d, want 404 (body %s)", res.StatusCode, body)
+	}
+
+	// Admin tetap bisa masuk.
+	adminApp := newAdminUsersGuardedApp(t, &domainTenancy.Principal{
+		UserID: 1, Username: "admin", Role: domainTenancy.RoleAdmin,
+	})
+	res, body = doJSON(t, adminApp, http.MethodGet, "/admin/users", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("sebagai admin: status = %d, want 200 (body %s)", res.StatusCode, body)
 	}
 }

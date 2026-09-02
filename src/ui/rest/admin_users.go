@@ -8,6 +8,7 @@ import (
 	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/authhash"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/middleware"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -24,19 +25,18 @@ type AdminUsersHandler struct {
 
 // InitRestAdminUsers mendaftarkan rute manajemen user.
 //
-// TODO(fase-03): bungkus grup ini dengan middleware.RequireAdmin(). Sampai
-// fase 03 memasang auth gate, principal belum tersedia, sehingga rute ini masih
-// terbuka bagi siapa pun yang punya kredensial APP_BASIC_AUTH. Itu sebabnya
-// mode multi-tenant belum boleh dinyalakan di produksi setelah fase 02 —
-// lihat docs/multitenant/README.md.
+// Seluruh rute berada di belakang middleware.RequireAdmin(), yang menjawab 404
+// untuk non-admin sehingga operator yang menebak URL tidak mendapat konfirmasi
+// bahwa permukaan ini ada.
 func InitRestAdminUsers(app fiber.Router, service domainTenancy.ITenancyUsecase) *AdminUsersHandler {
 	h := &AdminUsersHandler{Service: service}
 
-	app.Get("/admin/users", h.ListUsers)
-	app.Post("/admin/users", h.CreateUser)
-	app.Get("/admin/users/:id", h.GetUser)
-	app.Patch("/admin/users/:id", h.UpdateUser)
-	app.Delete("/admin/users/:id", h.DeleteUser)
+	admin := app.Group("/admin", middleware.RequireAdmin())
+	admin.Get("/users", h.ListUsers)
+	admin.Post("/users", h.CreateUser)
+	admin.Get("/users/:id", h.GetUser)
+	admin.Patch("/users/:id", h.UpdateUser)
+	admin.Delete("/users/:id", h.DeleteUser)
 
 	return h
 }

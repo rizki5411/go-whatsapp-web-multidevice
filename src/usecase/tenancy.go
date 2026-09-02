@@ -2,10 +2,13 @@ package usecase
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/authhash"
 	"github.com/sirupsen/logrus"
@@ -27,10 +30,28 @@ var usernamePattern = regexp.MustCompile(`^[a-z0-9._-]{3,64}$`)
 
 type serviceTenancy struct {
 	repo domainTenancy.ITenancyRepository
+
+	// breakGlass adalah kredensial APP_BASIC_AUTH. Disimpan di service, bukan
+	// dibaca dari config global di tiap pemanggilan, supaya perilakunya bisa
+	// diuji tanpa mengubah state global.
+	breakGlass []string
+
+	// basicCache menghindari satu operasi bcrypt per request pada jalur HTTP
+	// Basic; lihat tenancy_basiccache.go.
+	basicCache *basicAuthCache
 }
 
-func NewTenancyService(repo domainTenancy.ITenancyRepository) domainTenancy.ITenancyUsecase {
-	return &serviceTenancy{repo: repo}
+// NewTenancyService membangun service akun aplikasi.
+//
+// breakGlassCredentials adalah isi APP_BASIC_AUTH dalam bentuk "user:pass".
+// Dipakai untuk dua hal yang harus konsisten: menyemai admin pertama, dan
+// jalur break-glass di ResolveBasic. Keduanya membaca daftar yang sama persis.
+func NewTenancyService(repo domainTenancy.ITenancyRepository, breakGlassCredentials []string) domainTenancy.ITenancyUsecase {
+	return &serviceTenancy{
+		repo:       repo,
+		breakGlass: breakGlassCredentials,
+		basicCache: newBasicAuthCache(),
+	}
 }
 
 // validateUsername menormalisasi lalu memeriksa bentuk username.
@@ -172,6 +193,11 @@ func (s *serviceTenancy) UpdateUser(_ context.Context, id int64, in domainTenanc
 		}
 	}
 
+	// Cache verifikasi Basic dikosongkan untuk SETIAP perubahan di atas, bukan
+	// hanya password dan status aktif: role juga ikut tersimpan di principal
+	// yang di-cache, jadi penurunan role harus langsung berlaku.
+	s.basicCache.clear()
+
 	return user, nil
 }
 
@@ -203,7 +229,13 @@ func (s *serviceTenancy) DeleteUser(_ context.Context, id int64) error {
 
 	// Repository menghapus user, session, dan baris kepemilikannya dalam satu
 	// transaksi. Device-nya sendiri tetap ada dan menjadi tak-ber-owner.
-	return s.repo.DeleteUser(id)
+	if err := s.repo.DeleteUser(id); err != nil {
+		return err
+	}
+	// Tanpa ini, user yang baru dihapus masih bisa masuk lewat Basic sampai
+	// entri cache-nya kedaluwarsa sendiri.
+	s.basicCache.clear()
+	return nil
 }
 
 func (s *serviceTenancy) GetUser(_ context.Context, id int64) (*domainTenancy.User, error) {
@@ -271,13 +303,13 @@ func (s *serviceTenancy) Authenticate(_ context.Context, username, password stri
 // app_user, password di database yang menang dan nilai env diabaikan untuk
 // username itu. Kredensial env yang username-nya belum tercatat tetap berlaku
 // sebagai break-glass di fase 03.
-func (s *serviceTenancy) BootstrapAdminsFromEnv(ctx context.Context, credentials []string) (int, error) {
+func (s *serviceTenancy) BootstrapAdminsFromEnv(ctx context.Context) (int, error) {
 	if s.repo == nil {
 		return 0, fmt.Errorf("tenancy repository not initialized")
 	}
 
 	created := 0
-	for _, credential := range credentials {
+	for _, credential := range s.breakGlass {
 		username, password, ok := strings.Cut(credential, ":")
 		if !ok {
 			continue
@@ -315,4 +347,247 @@ func (s *serviceTenancy) BootstrapAdminsFromEnv(ctx context.Context, credentials
 	}
 
 	return created, nil
+}
+
+// _____________________________________________________________________________
+// Session login dan resolusi principal (fase 03)
+
+func (s *serviceTenancy) Login(ctx context.Context, username, password, userAgent string) (string, *domainTenancy.Principal, error) {
+	if s.repo == nil {
+		return "", nil, fmt.Errorf("tenancy repository not initialized")
+	}
+
+	principal, err := s.Authenticate(ctx, username, password)
+	if err != nil {
+		return "", nil, err
+	}
+	if principal == nil {
+		return "", nil, nil
+	}
+
+	token, tokenHash, err := authhash.NewSessionToken()
+	if err != nil {
+		return "", nil, err
+	}
+
+	// user_agent dipotong supaya header yang sengaja dibuat panjang tidak
+	// membengkakkan baris session; kolomnya sendiri hanya VARCHAR(255).
+	if len(userAgent) > 255 {
+		userAgent = userAgent[:255]
+	}
+
+	if err := s.repo.CreateSession(&domainTenancy.Session{
+		TokenHash: tokenHash,
+		UserID:    principal.UserID,
+		UserAgent: userAgent,
+		ExpiresAt: time.Now().Add(config.MultiTenantSessionTTL),
+	}); err != nil {
+		return "", nil, err
+	}
+
+	return token, principal, nil
+}
+
+func (s *serviceTenancy) Logout(_ context.Context, token string) error {
+	if s.repo == nil {
+		return fmt.Errorf("tenancy repository not initialized")
+	}
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	// Idempoten: menghapus token yang tidak dikenal bukan kegagalan, dan logout
+	// tidak boleh pernah menjawab error ke pengguna yang cookie-nya sudah basi.
+	return s.repo.DeleteSession(authhash.HashToken(token))
+}
+
+// ResolveSession memvalidasi token cookie.
+//
+// Session kedaluwarsa langsung dihapus di sini, bukan hanya diabaikan, supaya
+// tabelnya tidak menumpuk baris mati di antara dua siklus penyapu.
+func (s *serviceTenancy) ResolveSession(_ context.Context, token string) (*domainTenancy.Principal, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("tenancy repository not initialized")
+	}
+	if strings.TrimSpace(token) == "" {
+		return nil, nil
+	}
+
+	tokenHash := authhash.HashToken(token)
+	session, err := s.repo.GetSession(tokenHash)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, nil
+	}
+	if session.Expired(time.Now()) {
+		if err := s.repo.DeleteSession(tokenHash); err != nil {
+			logrus.WithError(err).Warn("[MULTITENANT] gagal menghapus session kedaluwarsa")
+		}
+		return nil, nil
+	}
+
+	user, err := s.repo.GetUserByID(session.UserID)
+	if err != nil {
+		return nil, err
+	}
+	// User yang sudah dihapus atau dinonaktifkan tidak boleh lolos meski
+	// cookie-nya masih dalam masa berlaku.
+	if user == nil || !user.Active {
+		if err := s.repo.DeleteSession(tokenHash); err != nil {
+			logrus.WithError(err).Warn("[MULTITENANT] gagal mencabut session milik user nonaktif")
+		}
+		return nil, nil
+	}
+
+	return &domainTenancy.Principal{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+	}, nil
+}
+
+// ResolveBasic memvalidasi kredensial HTTP Basic.
+//
+// Urutannya penting: app_user diperiksa lebih dulu, dan break-glass
+// APP_BASIC_AUTH hanya berlaku untuk username yang BELUM punya baris di
+// app_user. Begitu sebuah username tercatat, password database yang menang —
+// itu yang mencegah nilai env menjadi backdoor permanen setelah admin
+// mengganti passwordnya.
+func (s *serviceTenancy) ResolveBasic(_ context.Context, username, password string) (*domainTenancy.Principal, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("tenancy repository not initialized")
+	}
+
+	normalized := domainTenancy.NormalizeUsername(username)
+	if normalized == "" {
+		return nil, nil
+	}
+
+	if cached, ok := s.basicCache.get(normalized, password); ok {
+		return cached, nil
+	}
+
+	user, err := s.repo.GetUserByUsername(normalized)
+	if err != nil {
+		return nil, err
+	}
+
+	if user != nil {
+		if !authhash.VerifyPassword(user.PasswordHash, password) {
+			return nil, nil
+		}
+		if !user.Active {
+			return nil, nil
+		}
+		principal := &domainTenancy.Principal{
+			UserID:   user.ID,
+			Username: user.Username,
+			Role:     user.Role,
+		}
+		s.basicCache.put(normalized, password, principal)
+		return principal, nil
+	}
+
+	// Username belum ada di app_user: jalur break-glass.
+	principal := s.matchBreakGlass(normalized, password)
+	if principal == nil {
+		return nil, nil
+	}
+	s.basicCache.put(normalized, password, principal)
+	return principal, nil
+}
+
+// ResolvePrincipalByUsername menyusun principal tanpa memverifikasi password.
+//
+// Untuk pemanggil yang identitasnya sudah diverifikasi jalur lain — fase 07
+// memakainya untuk subject token OAuth MCP. Aturan break-glass-nya sama dengan
+// ResolveBasic dan sengaja memakai daftar yang sama, supaya tidak ada dua
+// definisi break-glass yang bisa menyimpang.
+func (s *serviceTenancy) ResolvePrincipalByUsername(_ context.Context, username string) (*domainTenancy.Principal, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("tenancy repository not initialized")
+	}
+
+	normalized := domainTenancy.NormalizeUsername(username)
+	if normalized == "" {
+		return nil, nil
+	}
+
+	user, err := s.repo.GetUserByUsername(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil {
+		// Token bisa terbit sebelum user dinonaktifkan; token yang masih valid
+		// secara kriptografis tidak boleh mengalahkan status akun.
+		if !user.Active {
+			return nil, nil
+		}
+		return &domainTenancy.Principal{
+			UserID:   user.ID,
+			Username: user.Username,
+			Role:     user.Role,
+		}, nil
+	}
+
+	// Tanpa baris app_user, satu-satunya identitas yang sah adalah username
+	// yang memang tercantum di APP_BASIC_AUTH.
+	for _, credential := range s.breakGlass {
+		credUser, _, ok := strings.Cut(credential, ":")
+		if !ok {
+			continue
+		}
+		if domainTenancy.NormalizeUsername(credUser) == normalized {
+			return &domainTenancy.Principal{
+				Username:      normalized,
+				Role:          domainTenancy.RoleAdmin,
+				ViaBreakGlass: true,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+// matchBreakGlass mencocokkan kredensial ke APP_BASIC_AUTH.
+//
+// Perbandingan password memakai subtle.ConstantTimeCompare, sama seperti
+// newBasicAuthMiddleware di cmd/rest.go, supaya jalur ini tidak lebih lemah
+// daripada jalur yang digantikannya.
+//
+// Principal hasilnya ber-UserID 0 dan karenanya tidak memiliki device apa pun.
+// Karena rolenya admin ia tetap bisa melihat semua device dan menetapkan
+// pemilik, yang cukup untuk memulihkan keadaan.
+func (s *serviceTenancy) matchBreakGlass(username, password string) *domainTenancy.Principal {
+	matched := false
+	for _, credential := range s.breakGlass {
+		credUser, credPass, ok := strings.Cut(credential, ":")
+		if !ok {
+			continue
+		}
+		if domainTenancy.NormalizeUsername(credUser) != username {
+			continue
+		}
+		// Tidak break di sini: perbandingan tetap dijalankan untuk setiap
+		// kredensial yang cocok username-nya, supaya waktu eksekusinya tidak
+		// bergantung pada posisi entri di daftar.
+		if subtle.ConstantTimeCompare([]byte(credPass), []byte(password)) == 1 {
+			matched = true
+		}
+	}
+	if !matched {
+		return nil
+	}
+	return &domainTenancy.Principal{
+		Username:      username,
+		Role:          domainTenancy.RoleAdmin,
+		ViaBreakGlass: true,
+	}
+}
+
+func (s *serviceTenancy) SweepExpiredSessions(_ context.Context) (int64, error) {
+	if s.repo == nil {
+		return 0, fmt.Errorf("tenancy repository not initialized")
+	}
+	return s.repo.DeleteExpiredSessions(time.Now())
 }

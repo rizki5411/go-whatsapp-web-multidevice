@@ -153,7 +153,15 @@ var _ domainTenancy.ITenancyRepository = (*fakeTenancyRepo)(nil)
 func newTenancyServiceForTest(t *testing.T) (domainTenancy.ITenancyUsecase, *fakeTenancyRepo) {
 	t.Helper()
 	repo := newFakeTenancyRepo()
-	return NewTenancyService(repo), repo
+	return NewTenancyService(repo, nil), repo
+}
+
+// newTenancyServiceWithBreakGlass membangun service dengan kredensial
+// APP_BASIC_AUTH tertentu, untuk menguji seeding dan jalur break-glass.
+func newTenancyServiceWithBreakGlass(t *testing.T, credentials []string) (domainTenancy.ITenancyUsecase, *fakeTenancyRepo) {
+	t.Helper()
+	repo := newFakeTenancyRepo()
+	return NewTenancyService(repo, credentials), repo
 }
 
 func mustCreateUser(t *testing.T, svc domainTenancy.ITenancyUsecase, username string, role domainTenancy.Role) *domainTenancy.User {
@@ -524,9 +532,9 @@ func TestAuthenticateFailuresAreIndistinguishable(t *testing.T) {
 // Bootstrap admin dari env
 
 func TestBootstrapAdminsFromEnvSeedsAdmins(t *testing.T) {
-	svc, _ := newTenancyServiceForTest(t)
+	svc, _ := newTenancyServiceWithBreakGlass(t, []string{"admin:rahasia123", "ops:rahasia456"})
 
-	created, err := svc.BootstrapAdminsFromEnv(context.Background(), []string{"admin:rahasia123", "ops:rahasia456"})
+	created, err := svc.BootstrapAdminsFromEnv(context.Background())
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
@@ -546,13 +554,12 @@ func TestBootstrapAdminsFromEnvSeedsAdmins(t *testing.T) {
 // TestBootstrapAdminsFromEnvIsIdempotent: dijalankan setiap startup, jadi
 // pemanggilan kedua tidak boleh membuat duplikat.
 func TestBootstrapAdminsFromEnvIsIdempotent(t *testing.T) {
-	svc, repo := newTenancyServiceForTest(t)
+	svc, repo := newTenancyServiceWithBreakGlass(t, []string{"admin:rahasia123"})
 
-	credentials := []string{"admin:rahasia123"}
-	if _, err := svc.BootstrapAdminsFromEnv(context.Background(), credentials); err != nil {
+	if _, err := svc.BootstrapAdminsFromEnv(context.Background()); err != nil {
 		t.Fatalf("bootstrap pertama: %v", err)
 	}
-	created, err := svc.BootstrapAdminsFromEnv(context.Background(), credentials)
+	created, err := svc.BootstrapAdminsFromEnv(context.Background())
 	if err != nil {
 		t.Fatalf("bootstrap kedua: %v", err)
 	}
@@ -568,9 +575,9 @@ func TestBootstrapAdminsFromEnvIsIdempotent(t *testing.T) {
 // di app_user, password database yang menang. Ini yang mencegah APP_BASIC_AUTH
 // jadi backdoor permanen setelah admin mengganti passwordnya.
 func TestBootstrapAdminsFromEnvNeverOverwritesStoredPassword(t *testing.T) {
-	svc, _ := newTenancyServiceForTest(t)
+	svc, _ := newTenancyServiceWithBreakGlass(t, []string{"admin:passwordenv1"})
 
-	if _, err := svc.BootstrapAdminsFromEnv(context.Background(), []string{"admin:passwordenv1"}); err != nil {
+	if _, err := svc.BootstrapAdminsFromEnv(context.Background()); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
@@ -586,7 +593,7 @@ func TestBootstrapAdminsFromEnvNeverOverwritesStoredPassword(t *testing.T) {
 	}
 
 	// Startup berikutnya menjalankan seeding lagi dengan nilai env yang lama.
-	if _, err := svc.BootstrapAdminsFromEnv(context.Background(), []string{"admin:passwordenv1"}); err != nil {
+	if _, err := svc.BootstrapAdminsFromEnv(context.Background()); err != nil {
 		t.Fatalf("bootstrap ulang: %v", err)
 	}
 
@@ -602,15 +609,15 @@ func TestBootstrapAdminsFromEnvNeverOverwritesStoredPassword(t *testing.T) {
 // memenuhi aturan tidak boleh menggagalkan startup. Username itu tetap bisa
 // masuk lewat break-glass di fase 03.
 func TestBootstrapAdminsFromEnvSkipsUnusableCredentials(t *testing.T) {
-	svc, repo := newTenancyServiceForTest(t)
-
-	created, err := svc.BootstrapAdminsFromEnv(context.Background(), []string{
+	svc, repo := newTenancyServiceWithBreakGlass(t, []string{
 		"admin:pendek",        // password di bawah batas
 		"tanpa-titik-dua",     // bukan format user:pass
 		":rahasia123",         // username kosong
 		"oper@tor:rahasia123", // username tidak valid
 		"valid:rahasia123",    // satu-satunya yang benar
 	})
+
+	created, err := svc.BootstrapAdminsFromEnv(context.Background())
 	if err != nil {
 		t.Fatalf("bootstrap tidak boleh mengembalikan error: %v", err)
 	}
@@ -625,7 +632,7 @@ func TestBootstrapAdminsFromEnvSkipsUnusableCredentials(t *testing.T) {
 func TestBootstrapAdminsFromEnvWithNoCredentials(t *testing.T) {
 	svc, repo := newTenancyServiceForTest(t)
 
-	created, err := svc.BootstrapAdminsFromEnv(context.Background(), nil)
+	created, err := svc.BootstrapAdminsFromEnv(context.Background())
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
@@ -634,5 +641,429 @@ func TestBootstrapAdminsFromEnvWithNoCredentials(t *testing.T) {
 	}
 	if count, _ := repo.CountUsers(); count != 0 {
 		t.Fatalf("jumlah user = %d, want 0", count)
+	}
+}
+
+// _____________________________________________________________________________
+// Session, break-glass, dan cache verifikasi Basic (fase 03)
+
+// sessionStore melengkapi fakeTenancyRepo dengan penyimpanan session, supaya
+// jalur login/logout bisa diuji tanpa database.
+type sessionStore struct {
+	*fakeTenancyRepo
+	sessions map[string]*domainTenancy.Session
+}
+
+func newSessionStore() *sessionStore {
+	return &sessionStore{fakeTenancyRepo: newFakeTenancyRepo(), sessions: map[string]*domainTenancy.Session{}}
+}
+
+func (s *sessionStore) CreateSession(session *domainTenancy.Session) error {
+	clone := *session
+	s.sessions[session.TokenHash] = &clone
+	return nil
+}
+
+func (s *sessionStore) GetSession(tokenHash string) (*domainTenancy.Session, error) {
+	session, ok := s.sessions[tokenHash]
+	if !ok {
+		return nil, nil
+	}
+	clone := *session
+	return &clone, nil
+}
+
+func (s *sessionStore) DeleteSession(tokenHash string) error {
+	delete(s.sessions, tokenHash)
+	return nil
+}
+
+func (s *sessionStore) DeleteSessionsByUser(userID int64) error {
+	if err := s.fakeTenancyRepo.DeleteSessionsByUser(userID); err != nil {
+		return err
+	}
+	for hash, session := range s.sessions {
+		if session.UserID == userID {
+			delete(s.sessions, hash)
+		}
+	}
+	return nil
+}
+
+func (s *sessionStore) DeleteExpiredSessions(now time.Time) (int64, error) {
+	var deleted int64
+	for hash, session := range s.sessions {
+		if session.Expired(now) {
+			delete(s.sessions, hash)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+var _ domainTenancy.ITenancyRepository = (*sessionStore)(nil)
+
+func newSessionServiceForTest(t *testing.T, breakGlass []string) (domainTenancy.ITenancyUsecase, *sessionStore) {
+	t.Helper()
+	store := newSessionStore()
+	return NewTenancyService(store, breakGlass), store
+}
+
+func TestLoginIssuesSessionAndResolvesIt(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, nil)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	token, principal, err := svc.Login(context.Background(), "operator1", "rahasia123", "curl/8")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if principal == nil || token == "" {
+		t.Fatal("expected a token and a principal")
+	}
+	// Yang disimpan harus hash, bukan token mentah: salinan DB tidak boleh
+	// cukup untuk membajak session yang masih hidup.
+	if _, ok := store.sessions[token]; ok {
+		t.Fatal("token mentah tidak boleh menjadi kunci penyimpanan")
+	}
+	if _, ok := store.sessions[authhash.HashToken(token)]; !ok {
+		t.Fatal("session harus tersimpan di bawah hash token")
+	}
+
+	resolved, err := svc.ResolveSession(context.Background(), token)
+	if err != nil {
+		t.Fatalf("resolve session: %v", err)
+	}
+	if resolved == nil || resolved.UserID != user.ID {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+}
+
+func TestLoginRejectsBadCredentials(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, nil)
+	mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	token, principal, err := svc.Login(context.Background(), "operator1", "salah-sekali", "")
+	if err != nil {
+		t.Fatalf("login tidak boleh error untuk kredensial salah: %v", err)
+	}
+	if token != "" || principal != nil {
+		t.Fatal("kredensial salah tidak boleh menerbitkan session")
+	}
+	if len(store.sessions) != 0 {
+		t.Fatal("tidak boleh ada session yang tersimpan")
+	}
+}
+
+func TestLogoutRevokesSession(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, nil)
+	mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	token, _, err := svc.Login(context.Background(), "operator1", "rahasia123", "")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	if err := svc.Logout(context.Background(), token); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if len(store.sessions) != 0 {
+		t.Fatal("session harus terhapus")
+	}
+
+	resolved, err := svc.ResolveSession(context.Background(), token)
+	if err != nil || resolved != nil {
+		t.Fatalf("token yang sudah logout tidak boleh berlaku (err %v)", err)
+	}
+
+	// Idempoten: logout kedua bukan error.
+	if err := svc.Logout(context.Background(), token); err != nil {
+		t.Fatalf("logout kedua: %v", err)
+	}
+}
+
+func TestResolveSessionRejectsAndDeletesExpired(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, nil)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	token, tokenHash, err := authhash.NewSessionToken()
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	if err := store.CreateSession(&domainTenancy.Session{
+		TokenHash: tokenHash,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	resolved, err := svc.ResolveSession(context.Background(), token)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved != nil {
+		t.Fatal("session kedaluwarsa tidak boleh berlaku")
+	}
+	// Dihapus di tempat, bukan hanya diabaikan, supaya tabel tidak menumpuk
+	// baris mati di antara dua siklus penyapu.
+	if len(store.sessions) != 0 {
+		t.Fatal("session kedaluwarsa harus langsung dihapus")
+	}
+}
+
+// TestResolveSessionRejectsDeactivatedUser: cookie yang masih dalam masa
+// berlaku tidak boleh mengalahkan status akun.
+func TestResolveSessionRejectsDeactivatedUser(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, nil)
+	mustCreateUser(t, svc, "admin1", domainTenancy.RoleAdmin)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	token, _, err := svc.Login(context.Background(), "operator1", "rahasia123", "")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	// Nonaktifkan langsung di store supaya session tidak ikut tercabut oleh
+	// UpdateUser — di sini yang diuji adalah pertahanan ResolveSession sendiri.
+	stored, _ := store.GetUserByID(user.ID)
+	stored.Active = false
+	if err := store.UpdateUser(stored); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+
+	resolved, err := svc.ResolveSession(context.Background(), token)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved != nil {
+		t.Fatal("user nonaktif tidak boleh lolos lewat cookie")
+	}
+	if len(store.sessions) != 0 {
+		t.Fatal("session milik user nonaktif harus dicabut")
+	}
+}
+
+// TestUpdatePasswordInvalidatesSessionAndBasicCache adalah inti keamanan fase
+// ini: ganti password harus langsung berlaku di KEDUA jalur masuk, bukan
+// setelah cache atau cookie kedaluwarsa sendiri.
+func TestUpdatePasswordInvalidatesSessionAndBasicCache(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, nil)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	token, _, err := svc.Login(context.Background(), "operator1", "rahasia123", "")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	// Isi cache Basic dengan password lama.
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", "rahasia123"); p == nil {
+		t.Fatal("basic auth awal harus berhasil")
+	}
+
+	newPassword := "rahasiabaru1"
+	if _, err := svc.UpdateUser(context.Background(), user.ID, domainTenancy.UpdateUserInput{Password: &newPassword}); err != nil {
+		t.Fatalf("ganti password: %v", err)
+	}
+
+	if resolved, _ := svc.ResolveSession(context.Background(), token); resolved != nil {
+		t.Fatal("cookie lama harus mati setelah password diganti")
+	}
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", "rahasia123"); p != nil {
+		t.Fatal("password lama masih diterima: cache Basic tidak ter-invalidasi")
+	}
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", newPassword); p == nil {
+		t.Fatal("password baru harus diterima")
+	}
+}
+
+// TestDeactivationInvalidatesBasicCache: tanpa pengosongan cache, user yang
+// dinonaktifkan masih bisa masuk sampai satu menit.
+func TestDeactivationInvalidatesBasicCache(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, nil)
+	mustCreateUser(t, svc, "admin1", domainTenancy.RoleAdmin)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", "rahasia123"); p == nil {
+		t.Fatal("basic auth awal harus berhasil")
+	}
+
+	inactive := false
+	if _, err := svc.UpdateUser(context.Background(), user.ID, domainTenancy.UpdateUserInput{Active: &inactive}); err != nil {
+		t.Fatalf("nonaktifkan: %v", err)
+	}
+
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", "rahasia123"); p != nil {
+		t.Fatal("user nonaktif masih diterima: cache Basic tidak ter-invalidasi")
+	}
+}
+
+// TestRoleChangeInvalidatesBasicCache: role ikut tersimpan di principal yang
+// di-cache, jadi penurunan role harus langsung berlaku juga.
+func TestRoleChangeInvalidatesBasicCache(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, nil)
+	mustCreateUser(t, svc, "admin1", domainTenancy.RoleAdmin)
+	user := mustCreateUser(t, svc, "admin2", domainTenancy.RoleAdmin)
+
+	p, _ := svc.ResolveBasic(context.Background(), "admin2", "rahasia123")
+	if p == nil || !p.IsAdmin() {
+		t.Fatal("admin2 harus terbaca sebagai admin")
+	}
+
+	operator := domainTenancy.RoleOperator
+	if _, err := svc.UpdateUser(context.Background(), user.ID, domainTenancy.UpdateUserInput{Role: &operator}); err != nil {
+		t.Fatalf("turunkan role: %v", err)
+	}
+
+	p, _ = svc.ResolveBasic(context.Background(), "admin2", "rahasia123")
+	if p == nil {
+		t.Fatal("user masih harus bisa masuk")
+	}
+	if p.IsAdmin() {
+		t.Fatal("role lama masih terbaca: cache Basic tidak ter-invalidasi")
+	}
+}
+
+func TestDeleteUserInvalidatesBasicCache(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, nil)
+	mustCreateUser(t, svc, "admin1", domainTenancy.RoleAdmin)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", "rahasia123"); p == nil {
+		t.Fatal("basic auth awal harus berhasil")
+	}
+	if err := svc.DeleteUser(context.Background(), user.ID); err != nil {
+		t.Fatalf("hapus user: %v", err)
+	}
+	if p, _ := svc.ResolveBasic(context.Background(), "operator1", "rahasia123"); p != nil {
+		t.Fatal("user yang sudah dihapus masih diterima")
+	}
+}
+
+// _____________________________________________________________________________
+// Break-glass
+
+// TestResolveBasicBreakGlassOnlyForUnknownUsername adalah aturan K6: env hanya
+// berlaku untuk username yang BELUM ada di app_user. Ini yang mencegah
+// APP_BASIC_AUTH menjadi backdoor permanen.
+func TestResolveBasicBreakGlassOnlyForUnknownUsername(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, []string{"darurat:passwordenv1", "admin:passwordenv1"})
+
+	// Username yang belum ada di app_user: break-glass berlaku, sebagai admin.
+	principal, err := svc.ResolveBasic(context.Background(), "darurat", "passwordenv1")
+	if err != nil {
+		t.Fatalf("resolve basic: %v", err)
+	}
+	if principal == nil {
+		t.Fatal("break-glass harus berlaku untuk username yang belum tercatat")
+	}
+	if !principal.IsAdmin() || !principal.ViaBreakGlass {
+		t.Fatalf("principal = %+v", principal)
+	}
+	// UserID 0 berarti tidak memiliki device apa pun; fase 04 mengandalkan itu.
+	if principal.UserID != 0 {
+		t.Fatalf("principal break-glass harus ber-UserID 0, dapat %d", principal.UserID)
+	}
+
+	// Sekarang buat akun database dengan username yang sama seperti entri env.
+	if _, err := svc.CreateUser(context.Background(), domainTenancy.CreateUserInput{
+		Username: "admin",
+		Password: "passworddb01",
+		Role:     domainTenancy.RoleAdmin,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	// Password env untuk username itu tidak boleh berlaku lagi.
+	if p, _ := svc.ResolveBasic(context.Background(), "admin", "passwordenv1"); p != nil {
+		t.Fatal("password env tidak boleh berlaku untuk username yang sudah ada di app_user")
+	}
+	// Password database yang menang.
+	p, err := svc.ResolveBasic(context.Background(), "admin", "passworddb01")
+	if err != nil {
+		t.Fatalf("resolve basic: %v", err)
+	}
+	if p == nil {
+		t.Fatal("password database harus berlaku")
+	}
+	if p.ViaBreakGlass {
+		t.Fatal("principal dari app_user tidak boleh ditandai break-glass")
+	}
+}
+
+func TestResolveBasicRejectsWrongBreakGlassPassword(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, []string{"darurat:passwordenv1"})
+
+	if p, _ := svc.ResolveBasic(context.Background(), "darurat", "salah"); p != nil {
+		t.Fatal("password break-glass yang salah tidak boleh diterima")
+	}
+	if p, _ := svc.ResolveBasic(context.Background(), "tidak-ada", "passwordenv1"); p != nil {
+		t.Fatal("username yang tidak ada di env maupun database tidak boleh diterima")
+	}
+}
+
+func TestResolveBasicWithoutBreakGlassCredentials(t *testing.T) {
+	svc, _ := newSessionServiceForTest(t, nil)
+
+	if p, _ := svc.ResolveBasic(context.Background(), "siapa-saja", "apa-saja"); p != nil {
+		t.Fatal("tanpa APP_BASIC_AUTH dan tanpa app_user, tidak ada yang boleh masuk")
+	}
+}
+
+// TestResolvePrincipalByUsernameSharesBreakGlassRule: fase 07 memakai jalur ini
+// untuk subject token OAuth MCP, dan aturannya harus sama dengan ResolveBasic.
+func TestResolvePrincipalByUsernameSharesBreakGlassRule(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, []string{"darurat:passwordenv1"})
+
+	p, err := svc.ResolvePrincipalByUsername(context.Background(), "darurat")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if p == nil || !p.IsAdmin() || !p.ViaBreakGlass {
+		t.Fatalf("principal = %+v", p)
+	}
+
+	if p, _ := svc.ResolvePrincipalByUsername(context.Background(), "tidak-ada"); p != nil {
+		t.Fatal("username asing tidak boleh menghasilkan principal")
+	}
+
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+	p, _ = svc.ResolvePrincipalByUsername(context.Background(), "operator1")
+	if p == nil || p.UserID != user.ID {
+		t.Fatalf("principal = %+v", p)
+	}
+
+	// Token bisa terbit sebelum user dinonaktifkan.
+	stored, _ := store.GetUserByID(user.ID)
+	stored.Active = false
+	if err := store.UpdateUser(stored); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if p, _ := svc.ResolvePrincipalByUsername(context.Background(), "operator1"); p != nil {
+		t.Fatal("user nonaktif tidak boleh menghasilkan principal")
+	}
+}
+
+func TestSweepExpiredSessions(t *testing.T) {
+	svc, store := newSessionServiceForTest(t, nil)
+	user := mustCreateUser(t, svc, "operator1", domainTenancy.RoleOperator)
+
+	for _, expires := range []time.Time{time.Now().Add(-time.Hour), time.Now().Add(time.Hour)} {
+		_, hash, err := authhash.NewSessionToken()
+		if err != nil {
+			t.Fatalf("token: %v", err)
+		}
+		if err := store.CreateSession(&domainTenancy.Session{TokenHash: hash, UserID: user.ID, ExpiresAt: expires}); err != nil {
+			t.Fatalf("seed session: %v", err)
+		}
+	}
+
+	deleted, err := svc.SweepExpiredSessions(context.Background())
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if len(store.sessions) != 1 {
+		t.Fatalf("sisa session = %d, want 1", len(store.sessions))
 	}
 }
