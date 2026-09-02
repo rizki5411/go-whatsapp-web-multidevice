@@ -7,6 +7,7 @@ import (
 	domainGroup "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/group"
 	domainMessage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/message"
 	domainSend "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/send"
+	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	domainUser "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/user"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -20,6 +21,12 @@ type Deps struct {
 	User    domainUser.IUserUsecase
 	Message domainMessage.IMessageUsecase
 	Group   domainGroup.IGroupUsecase
+
+	// Tenancy dan Ownership hanya terisi di mode multi-tenant (fitur fork).
+	// Keduanya nil di mode single-tenant, dan seluruh penjagaan di tenant.go
+	// menjaga nil itu.
+	Tenancy   PrincipalResolver
+	Ownership domainTenancy.IDeviceOwnership
 }
 
 // NewServer builds the MCPServer with the 5 consolidated tools registered.

@@ -8,6 +8,7 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatstorage"
+	uimcp "github.com/aldinokemal/go-whatsapp-web-multidevice/ui/mcp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/usecase"
 	"github.com/sirupsen/logrus"
@@ -128,6 +129,8 @@ func initMultiTenant() {
 		logrus.Infof("[MULTITENANT] %d admin disemai dari APP_BASIC_AUTH", created)
 	}
 
+	warnChatwootWebhookSecret()
+
 	logrus.Info("[MULTITENANT] mode multi-tenant aktif")
 }
 
@@ -165,3 +168,56 @@ func startSessionSweeper(ctx context.Context) {
 }
 
 const sessionSweepInterval = time.Hour
+
+// mcpDeps menyusun dependensi MCP di satu tempat.
+//
+// Ada dua jalur mounting MCP — OAuth (didaftarkan sebelum auth gate global) dan
+// Basic (di belakangnya) — dan keduanya harus mendapat dependensi yang sama.
+// Sebelumnya literal Deps ditulis dua kali, sehingga menambah field baru mudah
+// terlewat di salah satunya.
+func mcpDeps() uimcp.Deps {
+	return uimcp.Deps{
+		App:     appUsecase,
+		Send:    sendUsecase,
+		Chat:    chatUsecase,
+		User:    userUsecase,
+		Message: messageUsecase,
+		Group:   groupUsecase,
+		// Keduanya nil di mode single-tenant.
+		Tenancy:   tenancyMCPResolver(),
+		Ownership: deviceOwnership,
+	}
+}
+
+// tenancyMCPResolver mengembalikan nil interface — bukan interface berisi nil
+// pointer — saat fitur mati, supaya pemeriksaan nil di sisi MCP bekerja.
+func tenancyMCPResolver() uimcp.PrincipalResolver {
+	if tenancyUsecase == nil {
+		return nil
+	}
+	return tenancyUsecase
+}
+
+// warnChatwootWebhookSecret memperingatkan bahwa webhook Chatwoot tidak
+// terautentikasi.
+//
+// Rute itu sengaja didaftarkan sebelum auth (server Chatwoot memanggilnya tanpa
+// kredensial), sehingga siapa pun yang bisa menjangkau port ini dapat
+// menyuntikkan balasan agen ke device mana pun. Ini perilaku upstream, tapi di
+// mode multi-tenant artinya lintas tenant.
+//
+// Hanya warning, bukan fatal: mematikan startup karena konfigurasi yang di
+// upstream memang opsional akan mengubah upgrade menjadi outage.
+func warnChatwootWebhookSecret() {
+	if !config.MultiTenantEnabled || !config.ChatwootEnabled {
+		return
+	}
+	if strings.TrimSpace(config.ChatwootWebhookSecret) != "" {
+		return
+	}
+	logrus.Warn(
+		"[MULTITENANT] CHATWOOT_WEBHOOK_SECRET kosong: webhook Chatwoot tidak terautentikasi, " +
+			"sehingga siapa pun yang bisa menjangkau port ini dapat menyuntikkan pesan ke device tenant mana pun. " +
+			"Setel secret tersebut sebelum memakai mode multi-tenant bersama Chatwoot.",
+	)
+}

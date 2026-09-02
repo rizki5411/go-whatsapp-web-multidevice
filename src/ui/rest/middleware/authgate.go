@@ -164,3 +164,12 @@ func parseBasicAuth(header string) (username, password string, ok bool) {
 	}
 	return username, password, true
 }
+
+// BasicCredentials membaca kredensial HTTP Basic dari request.
+//
+// Diekspor untuk jalur yang tidak melewati AuthGate dan karenanya harus
+// memeriksa header itu sendiri — MCP dalam mode OAuth, yang rutenya sengaja
+// didaftarkan sebelum gate global supaya discovery tetap publik.
+func BasicCredentials(c fiber.Ctx) (username, password string, ok bool) {
+	return parseBasicAuth(c.Get(fiber.HeaderAuthorization))
+}

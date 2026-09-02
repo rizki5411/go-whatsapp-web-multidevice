@@ -197,14 +197,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	// one whatsmeow session. With OAuth disabled it keeps the existing global
 	// Basic Auth behavior; OAuth-enabled MCP was already mounted above.
 	if config.McpEnabled && !mcpOAuthRegistered {
-		uimcp.Register(apiGroup, dm, uimcp.Deps{
-			App:     appUsecase,
-			Send:    sendUsecase,
-			Chat:    chatUsecase,
-			User:    userUsecase,
-			Message: messageUsecase,
-			Group:   groupUsecase,
-		})
+		uimcp.Register(apiGroup, dm, mcpDeps())
 	}
 
 	// Device-scoped operations (header-based)
