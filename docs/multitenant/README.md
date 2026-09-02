@@ -161,6 +161,34 @@ Aturannya: **bandingkan dengan baseline di atas, bukan dengan "semua hijau".**
 Paket yang gagal harus tetap paket yang sama; kalau ada paket baru yang gagal,
 itu regresi dari pekerjaan kita.
 
+### Grup ber-prefiks kosong ikut menangkap rute yang didaftarkan setelahnya
+
+Ditemukan saat verifikasi Fase 05.
+
+`headerDeviceGroup := apiGroup.Group("", DeviceMiddleware, DeviceOwnerGuard)`
+dibuat di `cmd/rest.go` SEBELUM rute config Chatwoot didaftarkan. Karena
+prefiksnya kosong, middleware-nya ikut berjalan untuk rute yang didaftarkan
+belakangan pada `apiGroup` — termasuk `/devices/:device_id/chatwoot/config`.
+
+Akibatnya rute itu menuntut `X-Device-Id` meski device-nya sudah ada di path:
+
+```
+GET /devices/dev-b/chatwoot/config                  -> 400 DEVICE_ID_REQUIRED
+GET /devices/dev-b/chatwoot/config  (X-Device-Id: ) -> 200
+```
+
+**Ini perilaku upstream, bukan akibat pekerjaan multi-tenant.** Diverifikasi
+dengan `MULTI_TENANT_ENABLED=false`: hasilnya sama persis.
+
+Dua konsekuensi:
+
+1. Rute config Chatwoot ter-guard ganda — oleh `DeviceOwnerGuard` (karena
+   tertangkap grup) dan oleh `GuardParamDevice` di dalam resolvernya. Tidak
+   berbahaya, tapi jangan bingung saat membaca kodenya.
+2. Saat memverifikasi rute yang didaftarkan setelah `headerDeviceGroup`,
+   sertakan `X-Device-Id` — kalau tidak, yang terlihat adalah 400 dari
+   `DeviceMiddleware`, bukan perilaku handler yang sedang diuji.
+
 ### `-race` tidak tersedia di lingkungan ini
 
 `go test -race` menuntut cgo, dan cgo tidak tersedia (tidak ada gcc). Perintahnya
@@ -215,7 +243,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 | [02](phase-02-user-management.md) | User management + bootstrap admin | 01 | ya | ✅ |
 | [03](phase-03-auth-session.md) | Auth gate: session cookie + Basic dari DB | 02 | ya | ✅ |
 | [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ✅ |
-| [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ⬜ |
+| [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ✅ |
 | [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ⬜ |
 | [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ⬜ |
 | [08](phase-08-ui-operator.md) | UI operator: login, `/custom/users` | 03 (idealnya 05) | ya | ⬜ |

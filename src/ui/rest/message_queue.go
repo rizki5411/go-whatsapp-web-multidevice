@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	domainMessageQueue "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/messagequeue"
+	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/tenantfilter"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -20,13 +22,27 @@ import (
 type MessageQueueHandler struct {
 	DeviceManager *whatsapp.DeviceManager
 	QueueRepo     domainMessageQueue.IMessageQueueRepository
+
+	// Ownership nil di mode single-tenant; tenantfilter menjaga nil itu.
+	Ownership domainTenancy.IDeviceOwnership
 }
 
 // InitRestMessageQueue registers the queue routes. They take the device as a
 // path param and resolve it manually, so they must be registered outside
 // DeviceMiddleware (which only reads header/query).
 func InitRestMessageQueue(app fiber.Router, dm *whatsapp.DeviceManager, queueRepo domainMessageQueue.IMessageQueueRepository) *MessageQueueHandler {
-	h := &MessageQueueHandler{DeviceManager: dm, QueueRepo: queueRepo}
+	return InitRestMessageQueueWithOwnership(app, dm, queueRepo, nil)
+}
+
+// InitRestMessageQueueWithOwnership mendaftarkan rute antrian beserta penjaga
+// kepemilikannya.
+func InitRestMessageQueueWithOwnership(
+	app fiber.Router,
+	dm *whatsapp.DeviceManager,
+	queueRepo domainMessageQueue.IMessageQueueRepository,
+	ownership domainTenancy.IDeviceOwnership,
+) *MessageQueueHandler {
+	h := &MessageQueueHandler{DeviceManager: dm, QueueRepo: queueRepo, Ownership: ownership}
 
 	app.Get("/devices/:device_id/queue", h.ListQueue)
 	app.Delete("/devices/:device_id/queue/:queue_id", h.CancelQueued)
@@ -172,15 +188,10 @@ func (h *MessageQueueHandler) CancelQueued(c fiber.Ctx) error {
 // DeviceMiddleware only reads the header/query, so these routes resolve manually;
 // the result is cloned because fasthttp recycles the param buffer.
 func (h *MessageQueueHandler) resolveQueueDeviceID(c fiber.Ctx) (string, bool) {
-	deviceID := strings.TrimSpace(c.Params("device_id"))
-	if deviceID == "" || h.DeviceManager == nil {
-		return "", false
-	}
-	_, resolvedID, err := h.DeviceManager.ResolveDevice(deviceID)
-	if err != nil {
-		return "", false
-	}
-	return strings.Clone(resolvedID), true
+	// Kepemilikan ditegakkan DI DALAM resolver, bukan dipanggil terpisah di
+	// setiap handler: dengan begitu handler baru dari upstream yang memakai
+	// resolver ini otomatis terlindungi, alih-alih lolos tanpa suara.
+	return tenantfilter.GuardParamDevice(c, h.DeviceManager, h.Ownership)
 }
 
 func isKnownQueueStatus(status string) bool {

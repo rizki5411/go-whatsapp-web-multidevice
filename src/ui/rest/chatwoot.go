@@ -12,9 +12,11 @@ import (
 	domainChatStorage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
 	domainMessage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/message"
 	domainSend "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/send"
+	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatwoot"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/tenantfilter"
 	"github.com/gofiber/fiber/v3"
 	"github.com/sirupsen/logrus"
 )
@@ -25,6 +27,19 @@ type ChatwootHandler struct {
 	SendUsecase     domainSend.ISendUsecase
 	DeviceManager   *whatsapp.DeviceManager
 	ChatStorageRepo domainChatStorage.IChatStorageRepository
+
+	// Ownership nil di mode single-tenant; tenantfilter menjaga nil itu.
+	// Diisi lewat SetOwnership dari cmd/rest.go, bukan lewat konstruktor,
+	// supaya signature NewChatwootHandler upstream tidak berubah.
+	Ownership domainTenancy.IDeviceOwnership
+}
+
+// SetOwnership memasang penjaga kepemilikan pada handler Chatwoot.
+//
+// Dipisah dari konstruktor supaya NewChatwootHandler tetap sama seperti
+// upstream dan sync di masa depan tidak berkonflik di situ.
+func (h *ChatwootHandler) SetOwnership(ownership domainTenancy.IDeviceOwnership) {
+	h.Ownership = ownership
 }
 
 func NewChatwootHandler(
@@ -819,6 +834,14 @@ func (h *ChatwootHandler) SyncHistory(c fiber.Ctx) error {
 		})
 	}
 
+	// Sinkronisasi menulis riwayat device ini ke Chatwoot, jadi pemanggil harus
+	// memilikinya. Tanpa penjaga ini, operator yang tidak menyebut device_id
+	// akan menyapu device yang diset di CHATWOOT_DEVICE_ID — bisa milik orang
+	// lain.
+	if !tenantfilter.CanAccess(c, h.Ownership, resolvedID) {
+		return tenantfilter.DeviceNotFound(c)
+	}
+
 	// Resolve the per-device Chatwoot client (legacy/env client when the config
 	// table is empty). Sync runs against this device's own Chatwoot destination.
 	resolved := h.resolveChatwootForDevice(resolvedID)
@@ -908,6 +931,10 @@ func (h *ChatwootHandler) SyncStatus(c fiber.Ctx) error {
 			Code:    "DEVICE_NOT_FOUND",
 			Message: fmt.Sprintf("Failed to resolve device: %v", err),
 		})
+	}
+
+	if !tenantfilter.CanAccess(c, h.Ownership, resolvedID) {
+		return tenantfilter.DeviceNotFound(c)
 	}
 
 	storageDeviceID := instance.JID()
