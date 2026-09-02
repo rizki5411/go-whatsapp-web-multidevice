@@ -43,6 +43,17 @@ balik ke upstream. Fork ini akan terus sync perubahan dari upstream secara berka
       Tambah halaman baru: taruh HTML di `src/ui/rest/assets/`, embed, daftarkan
       di `InitRestCustomUI`.
 
+- [x] Multi-tenant: isolasi device per user + user management (role admin/operator).
+      Flag `MULTI_TENANT_ENABLED` (default false). Domain `src/domains/tenancy/`,
+      repo `sqlite_repository_tenancy.go` (tabel `app_user`, `device_owner`,
+      `user_session`; migration 55-61), auth gate
+      `src/ui/rest/middleware/authgate.go`, guard kepemilikan
+      `src/ui/rest/middleware/device_owner_guard.go`, helper rute path-param
+      `src/ui/rest/tenantfilter/`, API `src/ui/rest/auth.go` +
+      `admin_users.go` + `admin_device_owner.go`, MCP `src/ui/mcp/tenant.go`,
+      UI `/custom/login`, `/custom/users`, `/custom/devices`.
+      Rencana, rasional per fase, dan panduan operasi: `docs/multitenant/`.
+
 ## Pola yang WAJIB diikuti untuk fitur baru
 - Config per-device yang perlu disimpan & diatur lewat API: ikuti pola
   `ChatwootDeviceConfig` + `chatwoot_config.go` (sudah ada di project ini) —
@@ -51,3 +62,18 @@ balik ke upstream. Fork ini akan terus sync perubahan dari upstream secara berka
   pola `StartPresencePulseScheduler` (`presence_pulse.go`).
 - Migration tabel baru: HARUS ditambahkan di akhir `getMigrations()`
   (`sqlite_repository.go`), append-only, jangan disisipkan di tengah.
+- **Endpoint baru yang device-scoped WAJIB dijaga kepemilikannya.** Kalau
+  memakai header/query `device_id`, daftarkan di `headerDeviceGroup` — otomatis
+  ter-guard. Kalau memakai path param `:device_id`, panggil
+  `tenantfilter.GuardParamDevice`, sebaiknya dari dalam resolver device handler
+  itu sendiri supaya handler berikutnya ikut terlindungi. Endpoint yang
+  mengembalikan data lintas device wajib disaring dengan
+  `tenantfilter.ByDeviceID`. Lihat
+  `docs/multitenant/phase-05-enforcement-rute.md`.
+- **Jangan memasang middleware lewat grup ber-prefiks kosong**
+  (`app.Group("", mw)`): ia ikut membungkus SETIAP rute yang didaftarkan
+  setelahnya pada router yang sama. Pakai prefiks nyata, atau pasang middleware
+  per rute. Jebakan ini sudah tiga kali menimbulkan bug di fork ini —
+  `headerDeviceGroup`, `useMcpOAuthMiddleware`, dan `custom_ui.go`.
+- Broadcast WebSocket baru WAJIB mengisi `BroadcastMessage.DeviceID`. Yang
+  kosong dianggap event global dan hanya dikirim ke admin.

@@ -298,12 +298,15 @@ persis yang membuat test lama gagal di lingkungan ini.
 | [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ✅ |
 | [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ✅ |
 | [08](phase-08-ui-operator.md) | UI operator: login, `/custom/users` | 03 (idealnya 05) | ya | ✅ |
-| [09](phase-09-verifikasi-rollout.md) | Verifikasi end-to-end, dokumentasi, rollout | semua | ya | ⬜ |
+| [09](phase-09-verifikasi-rollout.md) | Verifikasi end-to-end, dokumentasi, rollout | semua | ya | ✅ |
 
 Fase 06 dan 08 tidak saling bergantung; boleh diparalelkan setelah 04/05 selesai.
 
 **Fase 04 dan 05 adalah inti keamanannya.** Fase 00–03 belum mengisolasi apa pun.
-Jangan aktifkan `MULTI_TENANT_ENABLED=true` di produksi sebelum fase 05 selesai.
+
+**Seluruh fase sudah selesai.** Untuk menyalakan di produksi, ikuti
+[OPERASI.md](OPERASI.md) — ada urutan langkah, cara mundur, dan daftar batasan
+yang diketahui.
 
 ---
 
@@ -397,6 +400,44 @@ audit ini **tidak ada pemanggilnya** — hanya deklarasi interface dan
 implementasinya — jadi bukan kebocoran aktif. Tapi kalau nanti ada handler yang
 memakainya, ia akan mengembalikan device milik siapa pun. Periksa ulang setiap
 sync upstream.
+
+---
+
+## Verifikasi
+
+Dua lapis, keduanya bisa dijalankan ulang.
+
+### Test Go
+
+```bash
+cd src && go build ./... && go vet ./... && go test -tags purego ./...
+```
+
+Yang paling penting: `TestIntegration*` di
+`src/ui/rest/multitenant_integration_test.go`. Ia mengunci matriks cross-tenant,
+fallback tanpa `X-Device-Id`, regresi mode single-tenant, dan siklus
+rollback (mati → nyala → penjagaan kembali dengan kepemilikan utuh). **Ini test
+yang akan menangkap regresi saat sync upstream berikutnya menambah rute baru.**
+
+### Matriks terhadap server sungguhan
+
+```bash
+cd src && go build -tags purego -o /tmp/gowa.exe . && cd .. && python docs/multitenant/verify_matrix.py --binary /tmp/gowa.exe
+```
+
+Skrip ini menyiapkan instalasi uji sendiri di direktori sementara — dua
+operator, satu admin, beberapa device, Chatwoot menyala, plus server terpisah
+untuk MCP OAuth dan untuk mode single-tenant. **Tidak pernah menyentuh
+`storages/` proyek.** Hasilnya dicetak sebagai tabel; baris yang tidak bisa
+diotomatiskan dilaporkan `lewat` beserta alasannya, bukan didiamkan.
+
+Hasil terakhir: **60 lulus, 0 gagal, 5 lewat.** Kelima yang lewat butuh kondisi
+yang tidak bisa dibuat bersamaan dalam satu instalasi uji (instalasi satu
+device, menunggu TTL sesi, dashboard gowa-ui), dan masing-masing sudah dikunci
+oleh test Go yang disebut di catatannya.
+
+Baris WebSocket memakai `wsprobe.mjs` (butuh `node`); tanpa node baris itu
+dilaporkan `lewat`.
 
 ## Glosarium
 
