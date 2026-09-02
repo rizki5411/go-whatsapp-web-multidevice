@@ -38,7 +38,7 @@ func handler(ctx context.Context, instance *DeviceInstance, rawEvt any) {
 		handleAppStateSyncComplete(ctx, client, evt)
 	case *events.PairSuccess:
 		instance.ClearPasskeyState()
-		handlePairSuccess(ctx, evt)
+		handlePairSuccess(ctx, instance, evt)
 	case *events.PairPasskeyRequest:
 		handlePairPasskeyRequest(instance, evt)
 	case *events.PairPasskeyConfirmation:
@@ -165,10 +165,14 @@ func handleAppStateSyncComplete(_ context.Context, client *whatsmeow.Client, evt
 	}
 }
 
-func handlePairSuccess(ctx context.Context, evt *events.PairSuccess) {
+// handlePairSuccess menerima instance supaya event pairing bisa ditandai
+// dengan device slot id-nya. evt.ID hanya membawa JID, sementara device_owner
+// ter-key oleh slot id.
+func handlePairSuccess(ctx context.Context, instance *DeviceInstance, evt *events.PairSuccess) {
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "LOGIN_SUCCESS",
-		Message: fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
+		Code:     "LOGIN_SUCCESS",
+		Message:  fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
+		DeviceID: instance.ID(),
 	}
 	primaryDB, secondaryDB := getStoreContainers()
 	syncKeysDevice(ctx, primaryDB, secondaryDB, evt.ID)
@@ -177,8 +181,9 @@ func handlePairSuccess(ctx context.Context, evt *events.PairSuccess) {
 func handlePairPasskeyRequest(instance *DeviceInstance, evt *events.PairPasskeyRequest) {
 	instance.SetPasskeyChallenge(evt.PublicKey)
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "PASSKEY_REQUEST",
-		Message: "Passkey pairing requested; submit the WebAuthn assertion via POST /app/passkey/response",
+		Code:     "PASSKEY_REQUEST",
+		Message:  "Passkey pairing requested; submit the WebAuthn assertion via POST /app/passkey/response",
+		DeviceID: instance.ID(),
 		Result: map[string]any{
 			"device_id": instance.ID(),
 			"challenge": evt.PublicKey,
@@ -193,8 +198,9 @@ func handlePairPasskeyConfirmation(instance *DeviceInstance, evt *events.PairPas
 		message = "Passkey pairing verified, finishing automatically"
 	}
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "PASSKEY_CONFIRMATION",
-		Message: message,
+		Code:     "PASSKEY_CONFIRMATION",
+		Message:  message,
+		DeviceID: instance.ID(),
 		Result: map[string]any{
 			"device_id":       instance.ID(),
 			"code":            evt.Code,
@@ -207,8 +213,9 @@ func handlePairPasskeyError(instance *DeviceInstance, evt *events.PairPasskeyErr
 	logrus.Warnf("[PASSKEY][%s] pairing error (continuation=%t): %v", instance.ID(), evt.Continuation, evt.Error)
 	instance.ClearPasskeyState()
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "PASSKEY_ERROR",
-		Message: evt.Error.Error(),
+		Code:     "PASSKEY_ERROR",
+		Message:  evt.Error.Error(),
+		DeviceID: instance.ID(),
 		Result: map[string]any{
 			"device_id":    instance.ID(),
 			"continuation": evt.Continuation,
@@ -236,9 +243,10 @@ func handleLoggedOut(instance *DeviceInstance) {
 	instance.TriggerLoggedOut()
 
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "DEVICE_LOGGED_OUT",
-		Message: "Device logged out (slot kept)",
-		Result:  map[string]string{"device_id": deviceID},
+		Code:     "DEVICE_LOGGED_OUT",
+		Message:  "Device logged out (slot kept)",
+		DeviceID: deviceID,
+		Result:   map[string]string{"device_id": deviceID},
 	}
 }
 

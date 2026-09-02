@@ -189,6 +189,27 @@ Dua konsekuensi:
    sertakan `X-Device-Id` — kalau tidak, yang terlihat adalah 400 dari
    `DeviceMiddleware`, bukan perilaku handler yang sedang diuji.
 
+### `/ws` device-scoped: koneksi WebSocket butuh device yang resolve
+
+Ditemukan saat verifikasi Fase 06.
+
+`websocket.RegisterRoutes` dipanggil dari `registerDeviceScopedRoutes`, jadi
+`/ws` berada di `headerDeviceGroup` dan melewati `DeviceMiddleware`. Koneksi
+karena itu harus menyertakan device yang bisa diresolve — lewat query
+`?device_id=` (WebSocket API browser tidak bisa mengirim header):
+
+```
+ws://host/ws?authorization=<base64>                    -> gagal (non-101) bila device tak resolve
+ws://host/ws?authorization=<base64>&device_id=dev-a    -> 101
+```
+
+Perilaku upstream. Konsekuensi setelah Fase 04: koneksi juga melewati
+`DeviceOwnerGuard`, sehingga operator tidak bisa membuka WebSocket dengan
+`device_id` milik orang lain — diverifikasi, koneksinya ditolak sebelum upgrade.
+
+Untuk menguji WebSocket, sertakan `device_id`; tanpa itu yang terlihat hanya
+kegagalan upgrade dan mudah disalahartikan sebagai kegagalan autentikasi.
+
 ### `-race` tidak tersedia di lingkungan ini
 
 `go test -race` menuntut cgo, dan cgo tidak tersedia (tidak ada gcc). Perintahnya
@@ -244,7 +265,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 | [03](phase-03-auth-session.md) | Auth gate: session cookie + Basic dari DB | 02 | ya | ✅ |
 | [04](phase-04-device-ownership.md) | Kepemilikan device + guard + filter daftar | 03 | ya | ✅ |
 | [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ✅ |
-| [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ⬜ |
+| [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ✅ |
 | [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ⬜ |
 | [08](phase-08-ui-operator.md) | UI operator: login, `/custom/users` | 03 (idealnya 05) | ya | ⬜ |
 | [09](phase-09-verifikasi-rollout.md) | Verifikasi end-to-end, dokumentasi, rollout | semua | ya | ⬜ |

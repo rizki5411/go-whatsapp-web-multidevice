@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
+
 	domainApp "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
 	domainDevice "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/device"
@@ -130,21 +132,26 @@ func (s *serviceDevice) LogoutDevice(ctx context.Context, deviceID string) error
 
 	// Broadcast the logout so UI clients can refresh. The device slot is kept, so it
 	// still appears in the list (disconnected) and can be re-paired under the same id.
-	var devices []domainDevice.Device
-	if s.manager != nil {
-		for _, inst := range s.manager.ListDevices() {
-			inst.UpdateStateFromClient()
-			devices = append(devices, convertInstance(inst))
+	result := map[string]any{"device_id": deviceID}
+
+	// Daftar device hanya untuk mode single-tenant; lihat alasan yang sama di
+	// serviceApp.Logout.
+	if !config.MultiTenantEnabled {
+		var devices []domainDevice.Device
+		if s.manager != nil {
+			for _, inst := range s.manager.ListDevices() {
+				inst.UpdateStateFromClient()
+				devices = append(devices, convertInstance(inst))
+			}
 		}
+		result["devices"] = devices
 	}
 
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "DEVICE_LOGGED_OUT",
-		Message: fmt.Sprintf("Device %s logged out (slot kept)", deviceID),
-		Result: map[string]any{
-			"device_id": deviceID,
-			"devices":   devices,
-		},
+		Code:     "DEVICE_LOGGED_OUT",
+		Message:  fmt.Sprintf("Device %s logged out (slot kept)", deviceID),
+		DeviceID: deviceID,
+		Result:   result,
 	}
 
 	return nil
@@ -220,8 +227,9 @@ func (s *serviceDevice) SetDeviceWebhook(ctx context.Context, deviceID string, w
 	}
 
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "DEVICE_WEBHOOK_UPDATED",
-		Message: fmt.Sprintf("Device %s webhook updated", deviceID),
+		Code:     "DEVICE_WEBHOOK_UPDATED",
+		Message:  fmt.Sprintf("Device %s webhook updated", deviceID),
+		DeviceID: deviceID,
 		Result: map[string]any{
 			"device_id":   deviceID,
 			"webhook_url": webhookURL,
@@ -281,8 +289,9 @@ func (s *serviceDevice) SetDeviceWebhookConfig(ctx context.Context, deviceID str
 	}
 
 	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "DEVICE_WEBHOOK_CONFIG_UPDATED",
-		Message: fmt.Sprintf("Device %s webhook config updated", deviceID),
+		Code:     "DEVICE_WEBHOOK_CONFIG_UPDATED",
+		Message:  fmt.Sprintf("Device %s webhook config updated", deviceID),
+		DeviceID: deviceID,
 		Result: map[string]any{
 			"device_id": deviceID,
 		},

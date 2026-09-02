@@ -165,7 +165,10 @@ func restServer(_ *cobra.Command, _ []string) {
 		rest.InitRestMessage(r, messageUsecase, sendUsecase)
 		rest.InitRestGroup(r, groupUsecase)
 		rest.InitRestNewsletter(r, newsletterUsecase)
-		websocket.RegisterRoutes(r, appUsecase)
+		// Principal disuntikkan sebagai fungsi: ui/websocket tidak boleh
+		// mengimpor ui/rest/middleware, karena middleware itu mengimpor
+		// infrastructure/whatsapp yang mengimpor ui/websocket.
+		websocket.RegisterRoutes(r, appUsecase, deviceOwnership, middleware.PrincipalFrom)
 	}
 
 	// Device management routes (no device_id required)
