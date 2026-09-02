@@ -43,10 +43,21 @@ func (s *serviceDeviceOwnership) cachedOwner(deviceID string) (int64, bool) {
 	return userID, ok
 }
 
+// cacheOwner menyimpan satu entri cache.
+//
+// Key-nya WAJIB di-clone. deviceID di sini datang dari c.Locals("device_id"),
+// yang isinya string tanpa-salin di atas buffer header fasthttp (Fiber berjalan
+// tanpa Immutable, jadi c.Get memakai utils.UnsafeString). Buffer itu didaur
+// ulang untuk request berikutnya di koneksi yang sama, sehingga key map yang
+// menyimpannya akan BERUBAH BYTE-nya setelah request selesai — map Go tidak
+// me-rehash, jadi isinya jadi tidak konsisten dan CanAccess bisa mengembalikan
+// pemilik device lain. Ini alasan yang sama dengan strings.Clone di
+// resolveDeviceParam (admin_device_owner.go) dan resolveConfigDeviceID
+// (command_config.go); bedanya di sini nilainya hidup lebih lama dari request.
 func (s *serviceDeviceOwnership) cacheOwner(deviceID string, userID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ownerCache[deviceID] = userID
+	s.ownerCache[strings.Clone(deviceID)] = userID
 }
 
 // invalidate membuang satu device dari cache. Dipanggil setiap kali

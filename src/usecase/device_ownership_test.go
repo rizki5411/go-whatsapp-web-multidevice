@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
@@ -426,5 +427,52 @@ func TestOwnerReturnsNilForUnclaimed(t *testing.T) {
 	owner, err = own.Owner("dev-orphan")
 	if err != nil || owner != nil {
 		t.Fatalf("device tak-ber-owner harus (nil, nil): %+v (err %v)", owner, err)
+	}
+}
+
+// _____________________________________________________________________________
+// Key cache tidak boleh ikut bermutasi
+
+// TestCacheOwnerClonesKey menjaga temuan yang hanya muncul saat dijalankan
+// sungguhan: c.Locals("device_id") berisi string tanpa-salin di atas buffer
+// header fasthttp, dan buffer itu didaur ulang untuk request berikutnya di
+// koneksi yang sama. Kalau string itu dipakai apa adanya sebagai key
+// ownerCache, byte-nya berubah setelah request selesai; map Go tidak me-rehash,
+// jadi lookup berikutnya bisa mengembalikan pemilik device LAIN — operator
+// mendapat akses ke device yang bukan miliknya.
+//
+// Test ini meniru daur ulang buffer itu dengan unsafe.String di atas slice yang
+// kemudian ditimpa. Tanpa strings.Clone di cacheOwner, key yang tersimpan ikut
+// berubah dan assertion di bawah gagal.
+func TestCacheOwnerClonesKey(t *testing.T) {
+	withMultiTenantUsecase(t, true)
+
+	own, store := newOwnershipServiceForTest(t)
+	user := seedUser(t, store, "operator1", domainTenancy.RoleOperator, 0)
+	store.owners["dev-a"] = user.ID
+
+	// Satu slot buffer header yang dipakai ulang antar request.
+	buffer := []byte("dev-a")
+	aliased := unsafe.String(&buffer[0], len(buffer))
+
+	principal := &domainTenancy.Principal{UserID: user.ID, Role: domainTenancy.RoleOperator}
+	if !own.CanAccess(principal, aliased) {
+		t.Fatal("pemilik harus boleh mengakses device-nya")
+	}
+
+	// Request berikutnya di koneksi yang sama menimpa buffer dengan id lain.
+	copy(buffer, "dev-b")
+
+	service, ok := own.(*serviceDeviceOwnership)
+	if !ok {
+		t.Fatalf("tipe tak terduga %T", own)
+	}
+	service.mu.RLock()
+	defer service.mu.RUnlock()
+	if _, poisoned := service.ownerCache["dev-b"]; poisoned {
+		t.Fatal("key cache ikut bermutasi: entri dev-a kini terbaca sebagai dev-b")
+	}
+	if _, intact := service.ownerCache["dev-a"]; !intact {
+		t.Fatal("entri dev-a hilang dari cache setelah buffer ditimpa")
 	}
 }
