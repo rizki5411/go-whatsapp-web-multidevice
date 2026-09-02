@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
@@ -57,6 +58,38 @@ func VerifyPassword(hash, plain string) bool {
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
 }
+
+// DummyHash mengembalikan hash bcrypt yang valid dan tidak cocok dengan
+// password apa pun yang bisa diketahui seseorang.
+//
+// Jalur login memakainya untuk tetap menjalankan satu verifikasi bcrypt saat
+// username tidak ditemukan. Tanpa itu, permintaan untuk username yang tidak
+// terdaftar akan kembali jauh lebih cepat daripada yang terdaftar, dan selisih
+// waktu itu membocorkan username mana yang ada.
+//
+// Nilainya di-generate dari 32 byte acak saat pertama dipakai, BUKAN
+// dituliskan sebagai konstanta: hash bcrypt yang beredar di internet umumnya
+// adalah test vector dari password umum seperti "password", yang justru akan
+// membuat fungsi ini memverifikasi sesuatu yang berguna.
+//
+// Biayanya satu operasi bcrypt sekali per proses, dan hasilnya di-cache supaya
+// waktu verifikasi tetap konstan setelahnya.
+func DummyHash() string { return dummyHash() }
+
+var dummyHash = sync.OnceValue(func() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		// crypto/rand praktis tidak pernah gagal. Kalaupun gagal, yang
+		// dibutuhkan di sini cuma hash valid yang menghabiskan waktu bcrypt,
+		// jadi nilai tetap pun sudah memenuhi tujuannya.
+		buf = []byte("gowa-login-timing-equalizer")
+	}
+	hashed, err := bcrypt.GenerateFromPassword(buf, bcrypt.DefaultCost)
+	if err != nil {
+		return ""
+	}
+	return string(hashed)
+})
 
 // NewSessionToken mengembalikan token acak 256-bit beserta hash SHA-256-nya.
 // Yang pertama dikirim ke browser sebagai cookie, yang kedua yang disimpan.

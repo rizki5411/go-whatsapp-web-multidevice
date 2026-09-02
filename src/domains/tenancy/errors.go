@@ -15,3 +15,32 @@ var ErrUserRequired = errors.New("user tidak valid")
 // ErrDeviceIDRequired dikembalikan saat operasi kepemilikan device menerima
 // device id kosong.
 var ErrDeviceIDRequired = errors.New("device id wajib diisi")
+
+// ErrUsernameInvalid dikembalikan saat username tidak memenuhi aturan bentuk
+// (panjang 3-64, hanya huruf kecil, angka, titik, garis bawah, dan tanda
+// hubung).
+var ErrUsernameInvalid = errors.New("username harus 3-64 karakter dan hanya boleh memuat a-z, 0-9, titik, garis bawah, atau tanda hubung")
+
+// ErrRoleInvalid dikembalikan saat role di luar admin/operator.
+var ErrRoleInvalid = errors.New("role harus \"admin\" atau \"operator\"")
+
+// ErrDeviceLimitInvalid dikembalikan saat device_limit negatif. 0 berarti tanpa
+// batas, jadi tidak ada arti untuk nilai di bawahnya.
+var ErrDeviceLimitInvalid = errors.New("device_limit tidak boleh negatif")
+
+// ErrUserNotFound dikembalikan operasi usecase yang menargetkan user tertentu
+// tapi tidak menemukannya.
+//
+// Berbeda dari repository, yang mengembalikan (nil, nil) untuk baris yang tidak
+// ada: di lapisan usecase, "user yang kamu minta untuk diubah tidak ada" adalah
+// kegagalan operasi, bukan keadaan normal.
+var ErrUserNotFound = errors.New("user tidak ditemukan")
+
+// ErrLastAdminProtected dikembalikan saat sebuah operasi akan membuat jumlah
+// admin aktif menjadi nol — lewat penghapusan, penurunan role, atau
+// penonaktifan.
+//
+// Tanpa penjaga ini, satu klik bisa membuat instance tidak punya siapa pun yang
+// bisa mengelola user lagi, dan pemulihannya hanya lewat break-glass
+// APP_BASIC_AUTH atau edit database manual.
+var ErrLastAdminProtected = errors.New("tidak bisa dilakukan: instance harus punya minimal satu admin aktif")

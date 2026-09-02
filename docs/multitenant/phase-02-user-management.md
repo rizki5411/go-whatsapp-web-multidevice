@@ -213,7 +213,10 @@ Semua logika seeding taruh di `src/cmd/multitenant.go` (file baru), bukan di
 - [ ] `cd src && go build ./... && go vet ./... && go test ./...` hijau.
 - [ ] Dengan `MULTI_TENANT_ENABLED=false`: tidak ada rute `/admin/*` yang
       terdaftar, tidak ada seeding, `app_user` tetap kosong. Buktikan dengan
-      `curl` yang mengembalikan 404.
+      `curl` yang responsnya **bukan** dari handler admin — di app ini path tak
+      terdaftar tertangkap `DeviceMiddleware` dan menjawab
+      `400 DEVICE_ID_REQUIRED`, bukan 404. Lihat "Rute yang tidak terdaftar
+      TIDAK menjawab 404" di `README.md`.
 - [ ] Dengan `MULTI_TENANT_ENABLED=true` dan `APP_BASIC_AUTH=admin:rahasia123`:
       startup pertama membuat satu baris admin; startup kedua **tidak** membuat
       duplikat (idempoten).

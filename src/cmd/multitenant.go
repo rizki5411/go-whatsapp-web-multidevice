@@ -1,11 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
+	domainTenancy "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/tenancy"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatstorage"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/usecase"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
+
+// tenancyUsecase diisi initMultiTenant dan tetap nil saat fitur mati, sehingga
+// pemanggil bisa memakainya sebagai penanda "mode multi-tenant aktif dan siap".
+var tenancyUsecase domainTenancy.ITenancyUsecase
 
 // Wiring konfigurasi untuk mode multi-tenant (isolasi device per user).
 // Ditaruh di file sendiri, bukan di root.go, supaya sync upstream tetap bebas
@@ -72,4 +81,38 @@ func loadMultiTenantEnvConfig() {
 			config.MultiTenantSecureCookie = viper.GetBool("multi_tenant_secure_cookie")
 		}
 	}
+}
+
+// initMultiTenant menyiapkan usecase tenancy dan menyemai admin pertama.
+//
+// Dipanggil dari restServer, bukan dari initApp, karena urutannya penting:
+// initApp berjalan lewat cobra.OnInitialize, yaitu SEBELUM
+// loadMultiTenantEnvConfig, sehingga config.MultiTenantEnabled di sana belum
+// mencerminkan nilai env. chatStorageDB sendiri sudah siap saat restServer
+// mulai, jadi wiring di sini aman dan root.go tidak perlu disentuh.
+//
+// No-op saat fitur mati.
+func initMultiTenant() {
+	if !config.MultiTenantEnabled {
+		return
+	}
+	if chatStorageDB == nil {
+		logrus.Error("[MULTITENANT] chat storage belum siap; mode multi-tenant tidak diaktifkan")
+		return
+	}
+
+	tenancyUsecase = usecase.NewTenancyService(chatstorage.NewTenancyRepository(chatStorageDB))
+
+	created, err := tenancyUsecase.BootstrapAdminsFromEnv(context.Background(), config.AppBasicAuthCredential)
+	if err != nil {
+		// Seeding yang gagal tidak boleh menggagalkan startup: kredensial
+		// APP_BASIC_AUTH tetap berlaku sebagai break-glass selama username-nya
+		// belum tercatat di app_user, jadi operator tidak pernah terkunci.
+		logrus.WithError(err).Warn("[MULTITENANT] penyemaian admin dari APP_BASIC_AUTH tidak selesai")
+	}
+	if created > 0 {
+		logrus.Infof("[MULTITENANT] %d admin disemai dari APP_BASIC_AUTH", created)
+	}
+
+	logrus.Info("[MULTITENANT] mode multi-tenant aktif")
 }
