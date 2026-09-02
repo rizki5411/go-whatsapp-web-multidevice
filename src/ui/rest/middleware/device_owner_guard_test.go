@@ -86,6 +86,16 @@ func (f *fakeOwnership) Owner(deviceID string) (*domainTenancy.DeviceOwner, erro
 
 func (f *fakeOwnership) EnsureQuota(*domainTenancy.Principal) error { return nil }
 
+func (f *fakeOwnership) DeviceCountByUser(userID int64) (int, error) {
+	count := 0
+	for _, owner := range f.owners {
+		if owner == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 var _ domainTenancy.IDeviceOwnership = (*fakeOwnership)(nil)
 
 // newTestDeviceManager membangun registry device nyata.

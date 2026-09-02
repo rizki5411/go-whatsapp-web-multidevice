@@ -80,6 +80,16 @@ func (o *tenantOwnership) Owner(deviceID string) (*domainTenancy.DeviceOwner, er
 }
 func (o *tenantOwnership) EnsureQuota(*domainTenancy.Principal) error { return nil }
 
+func (o *tenantOwnership) DeviceCountByUser(userID int64) (int, error) {
+	count := 0
+	for _, owner := range o.owners {
+		if owner == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 var _ domainTenancy.IDeviceOwnership = (*tenantOwnership)(nil)
 
 func tenantOperator(userID int64) *domainTenancy.Principal {

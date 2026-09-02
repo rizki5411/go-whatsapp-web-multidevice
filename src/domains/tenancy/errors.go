@@ -55,3 +55,14 @@ var ErrDeviceLimitReached = errors.New("jumlah device sudah mencapai batas untuk
 // jadi tidak ada user_id yang sah untuk dicatat sebagai pemilik. Menyimpannya
 // dengan user_id 0 akan membuat device dimiliki identitas yang tidak ada.
 var ErrBreakGlassCannotOwn = errors.New("kredensial APP_BASIC_AUTH tidak bisa memiliki device; buat akun di /admin/users lalu tetapkan pemiliknya")
+
+// ErrCurrentPasswordWrong dikembalikan saat password lama tidak cocok pada
+// penggantian password sendiri.
+var ErrCurrentPasswordWrong = errors.New("password saat ini salah")
+
+// ErrBreakGlassCannotChangePassword dikembalikan saat principal break-glass
+// mencoba mengganti passwordnya.
+//
+// Kredensial itu berasal dari APP_BASIC_AUTH dan tidak punya baris app_user,
+// jadi tidak ada yang bisa diubah dari sini.
+var ErrBreakGlassCannotChangePassword = errors.New("kredensial ini berasal dari APP_BASIC_AUTH; ubah di konfigurasi server, atau buat akun di /admin/users")

@@ -251,6 +251,13 @@ func (s *serviceDeviceOwnership) EnsureQuota(p *domainTenancy.Principal) error {
 	return s.ensureQuotaForUser(user)
 }
 
+func (s *serviceDeviceOwnership) DeviceCountByUser(userID int64) (int, error) {
+	if userID == 0 {
+		return 0, nil
+	}
+	return s.repo.CountDevicesByOwner(userID)
+}
+
 func (s *serviceDeviceOwnership) ensureQuotaForUser(user *domainTenancy.User) error {
 	// 0 berarti tanpa batas.
 	if user.DeviceLimit <= 0 {

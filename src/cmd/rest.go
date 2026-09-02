@@ -144,6 +144,8 @@ func restServer(_ *cobra.Command, _ []string) {
 			// OAuth MCP di atas.
 			authHandler = rest.NewAuthHandler(tenancyUsecase)
 			rest.InitRestAuthPublic(app, authHandler)
+			// Form login juga harus terjangkau tanpa kredensial.
+			rest.InitRestCustomUIPublic(app)
 			app.Use(middleware.AuthGate(tenancyUsecase, newBasicAuthMiddleware(account)))
 		} else {
 			app.Use(newBasicAuthMiddleware(account))
@@ -186,7 +188,7 @@ func restServer(_ *cobra.Command, _ []string) {
 	// Manajemen akun aplikasi (mode multi-tenant). tenancyUsecase hanya terisi
 	// saat fitur aktif, jadi rute ini tidak ada sama sekali di mode single-tenant.
 	if tenancyUsecase != nil {
-		rest.InitRestAdminUsers(apiGroup, tenancyUsecase)
+		rest.InitRestAdminUsersWithOwnership(apiGroup, tenancyUsecase, deviceOwnership)
 		rest.InitRestAdminDeviceOwner(apiGroup, dm, deviceOwnership, tenancyUsecase)
 		// /auth/me butuh principal, jadi tempatnya di belakang gate — berbeda
 		// dari /auth/login dan /auth/logout yang didaftarkan di atas.

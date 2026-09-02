@@ -591,3 +591,49 @@ func (s *serviceTenancy) SweepExpiredSessions(_ context.Context) (int64, error) 
 	}
 	return s.repo.DeleteExpiredSessions(time.Now())
 }
+
+// ChangeOwnPassword mengganti password user sendiri.
+//
+// Memverifikasi password lama meski pemanggil sudah terautentikasi: tanpa itu,
+// cookie yang dicuri cukup untuk mengunci pemilik akun keluar dari akunnya
+// sendiri.
+func (s *serviceTenancy) ChangeOwnPassword(_ context.Context, userID int64, currentPassword, newPassword string) error {
+	if s.repo == nil {
+		return fmt.Errorf("tenancy repository not initialized")
+	}
+	if userID == 0 {
+		// Principal break-glass tidak punya baris app_user, jadi tidak ada
+		// password yang bisa diganti.
+		return domainTenancy.ErrBreakGlassCannotChangePassword
+	}
+
+	user, err := s.repo.GetUserByID(userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return domainTenancy.ErrUserNotFound
+	}
+	if !authhash.VerifyPassword(user.PasswordHash, currentPassword) {
+		return domainTenancy.ErrCurrentPasswordWrong
+	}
+
+	hash, err := authhash.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	user.PasswordHash = hash
+
+	if err := s.repo.UpdateUser(user); err != nil {
+		return err
+	}
+
+	// Cabut semua session lalu kosongkan cache Basic. Pemanggil (handler REST)
+	// menerbitkan session baru untuk request yang sedang berjalan, sehingga
+	// pengguna tidak tertendang dari perangkat yang sedang dipakainya.
+	if err := s.repo.DeleteSessionsByUser(user.ID); err != nil {
+		return fmt.Errorf("password diganti tetapi session lama gagal dicabut: %w", err)
+	}
+	s.basicCache.clear()
+	return nil
+}

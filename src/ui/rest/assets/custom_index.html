@@ -43,6 +43,12 @@
 
   * { box-sizing: border-box; }
 
+  /* Aturan [hidden] milik UA punya spesifisitas rendah, jadi selector seperti
+     `a.card { display: block }` mengalahkannya dan elemen ber-atribut hidden
+     tetap terlihat. Kartu admin di halaman ini mengandalkan atribut itu, jadi
+     paksakan di sini. */
+  [hidden] { display: none !important; }
+
   body {
     margin: 0;
     background: var(--paper);
@@ -109,6 +115,36 @@
     color: var(--muted);
   }
   .note b { color: var(--ink); font-weight: 620; }
+
+  /* --- bar identitas (hanya mode multi-tenant) --- */
+  .who {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 26px;
+    font-size: 13.5px;
+  }
+  .who .id { font-weight: 620; }
+  .who .role {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 4px;
+    background: var(--sunken); color: var(--muted);
+  }
+  .who .role.admin { background: var(--signal-soft); color: var(--signal); }
+  .who .spacer { flex: 1; }
+  .who button {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 5px 11px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  }
+  .who button:hover { border-color: var(--ink); }
+  .who button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .who .glass { color: var(--signal); font-size: 12.5px; }
+  .who .msg { color: var(--muted); font-size: 12.5px; }
+  .who .msg.bad { color: var(--danger); }
+  .who .msg.ok { color: var(--live); }
 </style>
 </head>
 <body>
@@ -119,6 +155,16 @@
     Halaman operator untuk fitur yang hanya ada di fork ini. Dashboard utama datang dari
     proyek terpisah dan ditimpa setiap auto-update, jadi halaman-halaman ini ikut di dalam binary.
   </p>
+
+  <div class="who" id="who" hidden>
+    <span class="id" id="who-user"></span>
+    <span class="role" id="who-role"></span>
+    <span class="glass" id="who-glass" hidden>kredensial darurat APP_BASIC_AUTH</span>
+    <span class="spacer"></span>
+    <span class="msg" id="who-msg" role="status" aria-live="polite"></span>
+    <button type="button" id="who-pass">Ganti password</button>
+    <button type="button" id="who-out">Keluar</button>
+  </div>
 
   <div class="cards">
     <a class="card" href="custom/command">
@@ -131,6 +177,17 @@
       <h2>Antrian pengiriman <span class="path">/custom/queue</span></h2>
       <p>Lihat dan kelola antrian pesan per device: yang menunggu, terkirim, gagal, dan batalkan yang belum jalan.</p>
     </a>
+
+    <a class="card" href="custom/users" id="card-users" hidden>
+      <h2>Manajemen user <span class="path">/custom/users</span></h2>
+      <p>Buat dan atur akun operator: peran, batas jumlah device, reset password, aktif atau nonaktif.</p>
+    </a>
+
+    <a class="card" href="custom/devices" id="card-devices" hidden>
+      <h2>Pemilik device <span class="path">/custom/devices</span></h2>
+      <p>Tetapkan device ke user. Device tanpa pemilik hanya terlihat admin — mulai dari sini setelah
+        menyalakan mode multi-tenant.</p>
+    </a>
   </div>
 
   <p class="note">
@@ -139,5 +196,91 @@
     di <code>InitRestCustomUI</code>.
   </p>
 </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Served at {basePath}/custom, so strip that suffix to get the API root.
+  var API = window.location.pathname.replace(/\/custom\/?$/, "");
+
+  var el = function (id) { return document.getElementById(id); };
+  var bar = el("who"), msg = el("who-msg");
+
+  function say(text, kind) {
+    msg.textContent = text || "";
+    msg.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    opts.headers = Object.assign({ "Accept": "application/json" }, opts.headers || {});
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        return { status: r.status, body: body };
+      });
+    });
+  }
+
+  function show(me) {
+    el("who-user").textContent = me.username || "";
+    el("who-role").textContent = me.role || "";
+    el("who-role").className = "role" + (me.is_admin ? " admin" : "");
+    el("who-glass").hidden = !me.via_break_glass;
+    bar.hidden = false;
+
+    if (me.is_admin) {
+      el("card-users").hidden = false;
+      el("card-devices").hidden = false;
+    }
+  }
+
+  el("who-out").addEventListener("click", function () {
+    api("/auth/logout", { method: "POST" }).then(function () {
+      window.location.assign(API + "/custom/login");
+    }).catch(function () { say("Gagal keluar.", "bad"); });
+  });
+
+  el("who-pass").addEventListener("click", function () {
+    var current = window.prompt("Password saat ini:");
+    if (current === null) return;
+    var next = window.prompt("Password baru (minimal 8 karakter):");
+    if (next === null) return;
+    if (next.length < 8) { say("Password minimal 8 karakter.", "bad"); return; }
+
+    say("Menyimpan…");
+    api("/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: current, new_password: next })
+    }).then(function (res) {
+      if (res.status !== 200) {
+        say((res.body && res.body.message) || "Gagal mengganti password.", "bad");
+        return;
+      }
+      say((res.body && res.body.message) || "Password diganti.", "ok");
+    }).catch(function () { say("Tidak bisa menghubungi server.", "bad"); });
+  });
+
+  api("/auth/me").then(function (res) {
+    if (res.status === 200 && res.body.results) {
+      show(res.body.results);
+      return;
+    }
+    if (res.status === 401) {
+      var here = window.location.pathname + window.location.search;
+      window.location.assign(API + "/custom/login?next=" + encodeURIComponent(here));
+      return;
+    }
+    // Status lain — termasuk 404 karena rute /auth/* tidak didaftarkan di mode
+    // single-tenant, dan 400 dari DeviceMiddleware yang menangkap path tak
+    // terdaftar — berarti fitur ini tidak aktif. Halaman harus tetap utuh dan
+    // tidak menampilkan apa pun soal identitas.
+  }).catch(function () {
+    // Diamkan: halaman ini tetap berguna tanpa bar identitas.
+  });
+})();
+</script>
 </body>
 </html>

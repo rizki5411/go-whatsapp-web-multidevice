@@ -210,6 +210,36 @@ Perilaku upstream. Konsekuensi setelah Fase 04: koneksi juga melewati
 Untuk menguji WebSocket, sertakan `device_id`; tanpa itu yang terlihat hanya
 kegagalan upgrade dan mudah disalahartikan sebagai kegagalan autentikasi.
 
+### Dua jebakan UI yang hanya terlihat di browser sungguhan
+
+Ditemukan saat verifikasi Fase 08; keduanya lolos dari unit test.
+
+**1. Grup ber-prefiks kosong membocorkan middleware ke rute berikutnya.**
+`app.Group("", middleware.RequireAdmin())` di `custom_ui.go` ikut membungkus
+setiap rute yang didaftarkan setelahnya pada router yang sama — termasuk
+`/auth/me` dan `/auth/password`, sehingga operator tidak bisa melihat
+identitasnya sendiri. Pasang middleware **per rute**:
+
+```go
+app.Get("/custom/users", middleware.RequireAdmin(), h.UsersUI)
+```
+
+Ini jebakan yang sama dengan `headerDeviceGroup` dan `useMcpOAuthMiddleware`.
+Dijaga oleh `TestCustomUIDoesNotGuardLaterRoutes`.
+
+**2. Atribut `hidden` bisa dikalahkan CSS.** Aturan `[hidden] { display: none }`
+milik UA punya spesifisitas rendah, jadi `a.card { display: block }`
+mengalahkannya dan elemen ber-atribut `hidden` tetap terlihat. Kartu admin di
+`custom_index.html` mengandalkan atribut itu, sehingga operator sempat melihat
+seluruh menu admin. Setiap halaman yang menyembunyikan elemen dengan `hidden`
+harus memuat:
+
+```css
+[hidden] { display: none !important; }
+```
+
+Dijaga oleh `TestIndexHiddenAttributeIsEnforced`.
+
 ### `-race` tidak tersedia di lingkungan ini
 
 `go test -race` menuntut cgo, dan cgo tidak tersedia (tidak ada gcc). Perintahnya
@@ -267,7 +297,7 @@ persis yang membuat test lama gagal di lingkungan ini.
 | [05](phase-05-enforcement-rute.md) | Enforcement rute manual-resolve & agregat | 04 | ya | ✅ |
 | [06](phase-06-websocket.md) | Isolasi WebSocket | 04 | ya | ✅ |
 | [07](phase-07-mcp-permukaan-lain.md) | MCP, worker, webhook, audit lubang sisa | 05, 06 | ya | ✅ |
-| [08](phase-08-ui-operator.md) | UI operator: login, `/custom/users` | 03 (idealnya 05) | ya | ⬜ |
+| [08](phase-08-ui-operator.md) | UI operator: login, `/custom/users` | 03 (idealnya 05) | ya | ✅ |
 | [09](phase-09-verifikasi-rollout.md) | Verifikasi end-to-end, dokumentasi, rollout | semua | ya | ⬜ |
 
 Fase 06 dan 08 tidak saling bergantung; boleh diparalelkan setelah 04/05 selesai.

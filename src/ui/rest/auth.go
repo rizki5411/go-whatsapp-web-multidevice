@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
@@ -53,6 +54,7 @@ func InitRestAuthPublic(app fiber.Router, handler *AuthHandler) *AuthHandler {
 // InitRestAuth mendaftarkan rute yang butuh principal.
 func InitRestAuth(app fiber.Router, handler *AuthHandler) *AuthHandler {
 	app.Get("/auth/me", handler.Me)
+	app.Post("/auth/password", handler.ChangePassword)
 	return handler
 }
 
@@ -183,4 +185,70 @@ func principalView(principal *domainTenancy.Principal) map[string]any {
 		// principal seperti ini tidak memiliki device apa pun.
 		"via_break_glass": principal.ViaBreakGlass,
 	}
+}
+
+// changePasswordRequest adalah body POST /auth/password.
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" form:"current_password"`
+	NewPassword     string `json:"new_password"     form:"new_password"`
+}
+
+// ChangePassword mengganti password pemanggil sendiri.
+//
+// Password lama tetap diverifikasi meski pemanggil sudah terautentikasi:
+// cookie yang dicuri tidak boleh cukup untuk mengunci pemilik akun keluar.
+// Seluruh session lama dicabut, lalu session baru diterbitkan untuk request ini
+// supaya pengguna tidak tertendang dari perangkat yang sedang dipakainya.
+// POST /auth/password
+func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
+	principal := middleware.PrincipalFrom(c)
+	if principal == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(utils.ResponseData{
+			Status:  fiber.StatusUnauthorized,
+			Code:    "UNAUTHORIZED",
+			Message: "belum login",
+		})
+	}
+
+	var req changePasswordRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return utils.ResponseError(c, "Invalid request body")
+	}
+
+	if err := h.Service.ChangeOwnPassword(c.Context(), principal.UserID, req.CurrentPassword, req.NewPassword); err != nil {
+		switch {
+		case errors.Is(err, domainTenancy.ErrCurrentPasswordWrong):
+			return c.Status(fiber.StatusBadRequest).JSON(utils.ResponseData{
+				Status:  fiber.StatusBadRequest,
+				Code:    "CURRENT_PASSWORD_WRONG",
+				Message: err.Error(),
+			})
+		case errors.Is(err, domainTenancy.ErrBreakGlassCannotChangePassword):
+			return c.Status(fiber.StatusBadRequest).JSON(utils.ResponseData{
+				Status:  fiber.StatusBadRequest,
+				Code:    "BREAK_GLASS_ACCOUNT",
+				Message: err.Error(),
+			})
+		default:
+			return respondTenancyError(c, err)
+		}
+	}
+
+	// Session lama sudah dicabut usecase; terbitkan yang baru untuk request ini.
+	message := "Password diganti; semua session lain dicabut"
+	token, newPrincipal, err := h.Service.Login(c.Context(), principal.Username, req.NewPassword, c.Get(fiber.HeaderUserAgent))
+	if err != nil || newPrincipal == nil {
+		// Password sudah berganti; melaporkan sukses tanpa catatan ini akan
+		// membuat pengguna bingung saat request berikutnya minta login lagi.
+		middleware.ExpireSessionCookie(c)
+		message = "Password diganti; silakan login ulang"
+	} else {
+		middleware.SetSessionCookie(c, token, int(config.MultiTenantSessionTTL.Seconds()))
+	}
+
+	return c.JSON(utils.ResponseData{
+		Status:  fiber.StatusOK,
+		Code:    "SUCCESS",
+		Message: message,
+	})
 }
