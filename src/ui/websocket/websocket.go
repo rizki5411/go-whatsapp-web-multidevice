@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 
@@ -19,6 +20,9 @@ import (
 // memfilter tanpa query database per pesan.
 type client struct {
 	principal *domainTenancy.Principal
+
+	// seq adalah nomor urut registrasi koneksi ini; lihat connSeq.
+	seq uint64
 }
 
 type BroadcastMessage struct {
@@ -42,6 +46,7 @@ type BroadcastMessage struct {
 type registration struct {
 	conn      *websocket.Conn
 	principal *domainTenancy.Principal
+	seq       uint64
 }
 
 // directMessage adalah pesan untuk SATU koneksi.
@@ -51,7 +56,12 @@ type registration struct {
 // hub juga menulis ke koneksi yang sama.
 type directMessage struct {
 	conn *websocket.Conn
-	msg  BroadcastMessage
+	// seq mengunci pesan ini ke SATU registrasi koneksi. *websocket.Conn
+	// berasal dari sync.Pool milik contrib, jadi pointernya dipakai ulang oleh
+	// koneksi berikutnya; tanpa seq, pesan yang masih menunggu di buffer bisa
+	// tertulis ke koneksi lain yang kebetulan mewarisi pointer yang sama.
+	seq uint64
+	msg BroadcastMessage
 }
 
 var (
@@ -63,7 +73,27 @@ var (
 	// sibuk. Kalau buffer penuh ia memang memblokir — pesan tidak boleh
 	// dibuang, karena klien akan menunggu daftar device yang tak pernah datang.
 	Direct = make(chan directMessage, 32)
+	// Revoke meminta hub menutup semua koneksi milik satu user.
+	//
+	// Principal disalin sekali saat koneksi dibuka dan tidak diperiksa ulang:
+	// memvalidasinya per pesan berarti satu query per pesan per koneksi, di
+	// dalam loop panas hub. Konsekuensinya principal bisa basi, dan koneksi
+	// WebSocket berumur sangat panjang — tab dashboard bisa terbuka berhari-hari.
+	// Karena itu pencabutan hak dikirim ke sini sebagai peristiwa dan koneksinya
+	// DIPUTUS. Klien tinggal menyambung ulang; kalau haknya memang sudah
+	// dicabut, AuthGate dan DeviceOwnerGuard yang menolak — penegakannya tetap
+	// di satu tempat, bukan disalin ke sini.
+	//
+	// Kirim lewat RevokeUser, jangan langsung ke channel-nya.
+	Revoke = make(chan int64, 64)
 )
+
+// connSeq menomori setiap registrasi koneksi.
+//
+// Dinaikkan dari goroutine pembaca (satu per koneksi), jadi harus atomic —
+// ini satu-satunya state paket di file ini yang disentuh di luar RunHub, dan
+// ia sengaja dibuat tidak butuh penguncian.
+var connSeq uint64
 
 // ownership dipasang oleh RegisterRoutes.
 //
@@ -80,8 +110,57 @@ var ownership domainTenancy.IDeviceOwnership
 type PrincipalResolver func(c fiber.Ctx) *domainTenancy.Principal
 
 func handleRegister(reg registration) {
-	Clients[reg.conn] = client{principal: reg.principal}
+	Clients[reg.conn] = client{principal: reg.principal, seq: reg.seq}
 	logrus.Println("connection registered")
+}
+
+// RevokeUser memutus semua koneksi WebSocket milik satu user.
+//
+// Dipanggil setiap kali hak atau keabsahan akun berubah — role diturunkan,
+// akun dinonaktifkan, password diganti admin, user dihapus.
+//
+// Tidak boleh memblokir pemanggilnya: pemanggilnya adalah handler HTTP admin,
+// dan hub bisa sedang tertahan menulis ke koneksi yang lambat. Tidak boleh pula
+// membuang pesan — pencabutan yang hilang berarti koneksi yang seharusnya putus
+// tetap hidup dan tetap menerima event. Karena itu kalau buffer penuh,
+// pengirimannya dilanjutkan di goroutine sendiri; pencabutan adalah aksi admin
+// yang jarang, jadi goroutine cadangan itu tidak akan menumpuk.
+func RevokeUser(userID int64) {
+	if userID == 0 {
+		// UserID 0 adalah principal break-glass, yang tidak punya baris
+		// app_user. Mencabut atas nilai itu akan memutus koneksi yang tidak ada
+		// hubungannya dengan perubahan apa pun.
+		return
+	}
+	select {
+	case Revoke <- userID:
+	default:
+		go func() { Revoke <- userID }()
+	}
+}
+
+// connsOfUser mengumpulkan koneksi milik satu user.
+//
+// Terpisah dari handleRevoke supaya keputusan "koneksi mana yang diputus" bisa
+// diuji tanpa koneksi jaringan sungguhan.
+func connsOfUser(userID int64) []*websocket.Conn {
+	var targets []*websocket.Conn
+	for conn, cl := range Clients {
+		if cl.principal != nil && cl.principal.UserID == userID {
+			targets = append(targets, conn)
+		}
+	}
+	return targets
+}
+
+func handleRevoke(userID int64) {
+	if userID == 0 {
+		return
+	}
+	for _, conn := range connsOfUser(userID) {
+		logrus.Printf("connection revoked for user %d", userID)
+		closeConnection(conn)
+	}
 }
 
 func handleUnregister(conn *websocket.Conn) {
@@ -142,13 +221,19 @@ func broadcastMessage(message BroadcastMessage) {
 	}
 }
 
-// writeTo mengirim satu pesan ke satu koneksi.
-func writeTo(conn *websocket.Conn, message BroadcastMessage) {
+// writeTo mengirim satu pesan ke satu registrasi koneksi.
+//
+// seq dibandingkan, bukan cuma keberadaan conn di Clients: pointer koneksi
+// didaur ulang lewat sync.Pool contrib, jadi entri Clients yang ada belum tentu
+// koneksi yang meminta pesan ini.
+func writeTo(conn *websocket.Conn, seq uint64, message BroadcastMessage) {
 	if conn == nil {
 		return
 	}
-	if _, ok := Clients[conn]; !ok {
-		// Koneksi sudah lepas sebelum pesannya sampai di hub.
+	cl, ok := Clients[conn]
+	if !ok || cl.seq != seq {
+		// Koneksi sudah lepas sebelum pesannya sampai di hub — atau pointernya
+		// sudah dipakai ulang koneksi lain.
 		return
 	}
 	marshalMessage, err := json.Marshal(message.forWire())
@@ -191,7 +276,10 @@ func RunHub() {
 			broadcastMessage(message)
 
 		case direct := <-Direct:
-			writeTo(direct.conn, direct.msg)
+			writeTo(direct.conn, direct.seq, direct.msg)
+
+		case userID := <-Revoke:
+			handleRevoke(userID)
 		}
 	}
 }
@@ -265,7 +353,8 @@ func RegisterRoutes(
 		}()
 
 		principal, _ := conn.Locals(wsPrincipalLocalsKey).(*domainTenancy.Principal)
-		Register <- registration{conn: conn, principal: principal}
+		seq := atomic.AddUint64(&connSeq, 1)
+		Register <- registration{conn: conn, principal: principal, seq: seq}
 
 		for {
 			messageType, message, err := conn.ReadMessage()
@@ -297,7 +386,7 @@ func RegisterRoutes(
 						// langsung yang tidak bisa ditutup oleh filter
 						// DeviceID, karena satu payload memuat banyak device
 						// sekaligus.
-						Direct <- directMessage{conn: conn, msg: reply}
+						Direct <- directMessage{conn: conn, seq: seq, msg: reply}
 					} else {
 						// Mode single-tenant mempertahankan penyiaran ke semua
 						// koneksi. Perilaku itu memang aneh — satu koneksi

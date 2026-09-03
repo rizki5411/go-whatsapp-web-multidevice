@@ -136,6 +136,7 @@ func (s *serviceTenancy) UpdateUser(_ context.Context, id int64, in domainTenanc
 	// harus dicabut, dan apakah invarian admin terakhir tersentuh.
 	passwordChanged := false
 	wasActiveAdmin := user.IsAdmin() && user.Active
+	previousRole := user.Role
 
 	if in.Password != nil {
 		hash, err := authhash.HashPassword(*in.Password)
@@ -198,6 +199,13 @@ func (s *serviceTenancy) UpdateUser(_ context.Context, id int64, in domainTenanc
 	// yang di-cache, jadi penurunan role harus langsung berlaku.
 	s.basicCache.clear()
 
+	// Koneksi WebSocket membawa salinan principal yang tidak pernah diperiksa
+	// ulang, jadi ketiga perubahan itu harus memutusnya. Lihat
+	// tenancy_revoke.go.
+	if passwordChanged || deactivated || user.Role != previousRole {
+		revokeWebsocketSessions(user.ID)
+	}
+
 	return user, nil
 }
 
@@ -235,6 +243,7 @@ func (s *serviceTenancy) DeleteUser(_ context.Context, id int64) error {
 	// Tanpa ini, user yang baru dihapus masih bisa masuk lewat Basic sampai
 	// entri cache-nya kedaluwarsa sendiri.
 	s.basicCache.clear()
+	revokeWebsocketSessions(id)
 	return nil
 }
 

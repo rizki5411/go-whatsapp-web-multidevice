@@ -827,6 +827,16 @@ func (h *ChatwootHandler) SyncHistory(c fiber.Ctx) error {
 	// Resolve device
 	instance, resolvedID, err := h.DeviceManager.ResolveDevice(req.DeviceID)
 	if err != nil {
+		// Penolakan ini WAJIB tidak bisa dibedakan dari penolakan kepemilikan di
+		// bawah: 400 berisi id yang gagal diresolve, sementara device milik orang
+		// lain menjawab 404 polos — bedanya saja sudah cukup untuk meng-enumerasi
+		// device id yang ada di instalasi ini (K4). Aturan yang dipakai sama
+		// dengan jalur fallback DELETE: device tanpa pemilik hanya untuk admin,
+		// jadi hanya admin yang tetap melihat diagnostiknya. No-op saat mode
+		// multi-tenant mati.
+		if !tenantfilter.CanActOnUnresolvedDevice(c, h.Ownership) {
+			return tenantfilter.DeviceNotFound(c)
+		}
 		return c.Status(fiber.StatusBadRequest).JSON(utils.ResponseData{
 			Status:  fiber.StatusBadRequest,
 			Code:    "DEVICE_NOT_FOUND",
@@ -926,6 +936,11 @@ func (h *ChatwootHandler) SyncStatus(c fiber.Ctx) error {
 
 	instance, resolvedID, err := h.DeviceManager.ResolveDevice(deviceID)
 	if err != nil {
+		// Sama seperti SyncHistory: tanpa masking ini, 400-vs-404 memberi tahu
+		// operator device id mana yang ada.
+		if !tenantfilter.CanActOnUnresolvedDevice(c, h.Ownership) {
+			return tenantfilter.DeviceNotFound(c)
+		}
 		return c.Status(fiber.StatusBadRequest).JSON(utils.ResponseData{
 			Status:  fiber.StatusBadRequest,
 			Code:    "DEVICE_NOT_FOUND",
