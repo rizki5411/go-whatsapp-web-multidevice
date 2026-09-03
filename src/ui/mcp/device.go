@@ -30,8 +30,15 @@ func resolveDeviceContext(ctx context.Context, request mcpg.CallToolRequest, res
 		if err != nil {
 			return ctx, nil, err
 		}
+		// Kepemilikan diperiksa dengan id hasil resolusi — itulah kunci di
+		// device_owner — tapi yang DILAPORKAN adalah id yang dikirim
+		// pemanggil. ResolveDevice juga menerima JID, dan untuk JID
+		// resolvedID adalah id slot internal: melaporkannya memberi tahu
+		// pemanggil bahwa device itu eksis sekaligus membocorkan id-nya,
+		// padahal JID yang benar-benar tidak ada dijawab dengan JID itu
+		// sendiri. Dua bentuk pesan yang berbeda itu persis kebocoran K4.
 		if err := enforceDeviceOwnership(ctx, resolvedID); err != nil {
-			return ctx, nil, err
+			return ctx, nil, deviceNotFound(deviceID)
 		}
 		return whatsapp.ContextWithDevice(ctx, inst), inst, nil
 	}

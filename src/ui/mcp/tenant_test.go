@@ -286,6 +286,53 @@ func TestResolveDeviceContextEnforcesOwnership(t *testing.T) {
 	assert.Equal(t, "device dev-hantu not found", missingErr.Error())
 }
 
+// jidStubResolver meniru DeviceManager.ResolveDevice untuk input berupa JID:
+// device ditemukan lewat JID, tapi id yang dikembalikan adalah id slot
+// internal — BUKAN JID yang dikirim pemanggil. Perbedaan itu yang dulu membuat
+// pesan error membocorkan keberadaan dan id device milik tenant lain.
+type jidStubResolver struct {
+	inst    *whatsapp.DeviceInstance
+	jid     string
+	slotID  string
+	lookups []string
+}
+
+func (s *jidStubResolver) ResolveDevice(deviceID string) (*whatsapp.DeviceInstance, string, error) {
+	s.lookups = append(s.lookups, deviceID)
+	if deviceID == s.jid || deviceID == s.slotID {
+		return s.inst, s.slotID, nil
+	}
+	return nil, deviceID, errors.New("device " + deviceID + " not found")
+}
+
+// TestResolveDeviceContextDoesNotLeakSlotIDForJID mengunci K4 pada cabang yang
+// paling mudah terlewat: device di-resolve lewat JID. Nomor WhatsApp itu mudah
+// ditebak, jadi kalau JID milik tenant lain dijawab dengan id slot internalnya
+// sementara JID yang tidak ada dijawab dengan JID itu sendiri, bentuk pesannya
+// saja sudah menjadi oracle keberadaan sekaligus membocorkan id device.
+func TestResolveDeviceContextDoesNotLeakSlotIDForJID(t *testing.T) {
+	own := newFakeTenantOwnership(map[string]int64{"dev-a": 7, "dev-b": 8})
+	withTenantState(t, true, own)
+
+	const victimJID = "628999000111@s.whatsapp.net"
+	const ghostJID = "628999000999@s.whatsapp.net"
+
+	resolver := &jidStubResolver{inst: &whatsapp.DeviceInstance{}, jid: victimJID, slotID: "dev-b"}
+	ctx := domainTenancy.ContextWithPrincipal(context.Background(), operatorPrincipal(7))
+
+	_, _, err := resolveDeviceContext(ctx, callReq(map[string]any{"device_id": victimJID}), resolver)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errDeviceNotFoundMCP), "err = %v", err)
+
+	_, _, ghostErr := resolveDeviceContext(ctx, callReq(map[string]any{"device_id": ghostJID}), resolver)
+	require.Error(t, ghostErr)
+
+	// Keduanya harus menyebut apa yang DIKIRIM pemanggil, tidak pernah id slot.
+	assert.Equal(t, "device "+victimJID+" not found", err.Error())
+	assert.Equal(t, "device "+ghostJID+" not found", ghostErr.Error())
+	assert.NotContains(t, err.Error(), "dev-b", "id slot internal tidak boleh muncul di pesan")
+}
+
 func TestResolveDeviceContextAllowsAdmin(t *testing.T) {
 	own := newFakeTenantOwnership(map[string]int64{"dev-b": 8})
 	withTenantState(t, true, own)

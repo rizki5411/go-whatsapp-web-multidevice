@@ -470,3 +470,146 @@ func TestChatwootConfigIsTransparentWhenDisabled(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (body %s)", res.StatusCode, body)
 	}
 }
+
+// _____________________________________________________________________________
+// Sinkronisasi Chatwoot
+
+func newChatwootSyncTenantApp(t *testing.T, principal *domainTenancy.Principal, own domainTenancy.IDeviceOwnership) *fiber.App {
+	t.Helper()
+
+	handler := NewChatwootHandler(nil, nil, nil, twoDeviceManager(), newFakeConfigStore())
+	handler.SetOwnership(own)
+
+	app := fiber.New()
+	withPrincipal(app, principal)
+	app.Post("/chatwoot/sync", handler.SyncHistory)
+	app.Get("/chatwoot/sync/status", handler.SyncStatus)
+	return app
+}
+
+// setChatwootDeviceID meniru instalasi warisan yang masih memakai
+// CHATWOOT_DEVICE_ID sebagai device default.
+func setChatwootDeviceID(t *testing.T, deviceID string) {
+	t.Helper()
+	previous := config.ChatwootDeviceID
+	config.ChatwootDeviceID = deviceID
+	t.Cleanup(func() { config.ChatwootDeviceID = previous })
+}
+
+// TestChatwootSyncCrossTenantIsIndistinguishable: menolak dengan 404 saja tidak
+// cukup — device orang lain dan device yang tidak ada harus menjawab PERSIS
+// sama. Kalau tidak, selisih 400/404 saja sudah cukup untuk meng-enumerasi
+// device id yang ada di instalasi ini (K4).
+func TestChatwootSyncCrossTenantIsIndistinguishable(t *testing.T) {
+	enableMultiTenantForTest(t, true)
+
+	own := newTenantOwnership(map[string]int64{"dev-a": 7, "dev-b": 8})
+	app := newChatwootSyncTenantApp(t, tenantOperator(7), own)
+
+	cases := []struct{ name, method, path, body string }{
+		{"sync device orang lain", http.MethodPost, "/chatwoot/sync", `{"device_id":"dev-b"}`},
+		{"sync device tidak ada", http.MethodPost, "/chatwoot/sync", `{"device_id":"dev-hantu"}`},
+		{"status device orang lain", http.MethodGet, "/chatwoot/sync/status?device_id=dev-b", ""},
+		{"status device tidak ada", http.MethodGet, "/chatwoot/sync/status?device_id=dev-hantu", ""},
+	}
+
+	// Dibandingkan satu sama lain, bukan terhadap literal: yang wajib dijaga
+	// adalah kesamaannya, dan literal akan ikut basi kalau amplop response
+	// berubah.
+	var first string
+	for i, tc := range cases {
+		res, body := doJSON(t, app, tc.method, tc.path, tc.body)
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404 (body %s)", tc.name, res.StatusCode, body)
+		}
+		if strings.Contains(body, "dev-b") || strings.Contains(body, "dev-hantu") {
+			t.Fatalf("%s: device id bocor di badan penolakan: %s", tc.name, body)
+		}
+		if i == 0 {
+			first = body
+			continue
+		}
+		if body != first {
+			t.Fatalf("penolakan harus tidak bisa dibedakan:\n  %s: %s\n  %s: %s",
+				cases[0].name, first, tc.name, body)
+		}
+	}
+}
+
+// TestChatwootSyncFallbackDeviceIsGuarded: pemanggil yang tidak menyebut device
+// sama sekali jatuh ke CHATWOOT_DEVICE_ID, yang bisa saja milik orang lain.
+func TestChatwootSyncFallbackDeviceIsGuarded(t *testing.T) {
+	enableMultiTenantForTest(t, true)
+	setChatwootDeviceID(t, "dev-b")
+
+	own := newTenantOwnership(map[string]int64{"dev-a": 7, "dev-b": 8})
+	app := newChatwootSyncTenantApp(t, tenantOperator(7), own)
+
+	for _, tc := range []struct{ name, method, path, body string }{
+		{"sync tanpa body", http.MethodPost, "/chatwoot/sync", ""},
+		{"sync body kosong", http.MethodPost, "/chatwoot/sync", `{}`},
+		{"status tanpa query", http.MethodGet, "/chatwoot/sync/status", ""},
+	} {
+		res, body := doJSON(t, app, tc.method, tc.path, tc.body)
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404 (body %s)", tc.name, res.StatusCode, body)
+		}
+	}
+}
+
+// TestChatwootSyncOwnDeviceIsNotMasked: masking hanya berlaku untuk device yang
+// bukan miliknya — device sendiri harus lolos penjaga.
+func TestChatwootSyncOwnDeviceIsNotMasked(t *testing.T) {
+	enableMultiTenantForTest(t, true)
+
+	own := newTenantOwnership(map[string]int64{"dev-a": 7, "dev-b": 8})
+	app := newChatwootSyncTenantApp(t, tenantOperator(7), own)
+
+	res, body := doJSON(t, app, http.MethodPost, "/chatwoot/sync", `{"device_id":"dev-a"}`)
+	if res.StatusCode == http.StatusNotFound {
+		t.Fatalf("device sendiri ikut termasking: %d %s", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "CHATWOOT_NOT_CONFIGURED") {
+		t.Fatalf("harusnya lolos penjaga lalu berhenti di konfigurasi Chatwoot: %s", body)
+	}
+}
+
+// TestChatwootSyncAdminKeepsDiagnostic: admin boleh melihat seluruh device, jadi
+// tidak ada yang bocor dengan memberinya pesan resolusi yang sebenarnya.
+func TestChatwootSyncAdminKeepsDiagnostic(t *testing.T) {
+	enableMultiTenantForTest(t, true)
+
+	own := newTenantOwnership(map[string]int64{"dev-a": 7, "dev-b": 8})
+	app := newChatwootSyncTenantApp(t, tenantAdmin(), own)
+
+	res, body := doJSON(t, app, http.MethodPost, "/chatwoot/sync", `{"device_id":"dev-hantu"}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "Failed to resolve device") {
+		t.Fatalf("admin harus tetap melihat diagnostiknya: %s", body)
+	}
+}
+
+// TestChatwootSyncIsTransparentWhenDisabled: dengan flag mati, 400 lama harus
+// kembali apa adanya — masking tidak boleh mengubah perilaku single-tenant.
+func TestChatwootSyncIsTransparentWhenDisabled(t *testing.T) {
+	enableMultiTenantForTest(t, false)
+	setChatwootDeviceID(t, "dev-b")
+
+	own := newTenantOwnership(map[string]int64{"dev-a": 7, "dev-b": 8})
+	app := newChatwootSyncTenantApp(t, tenantOperator(7), own)
+
+	res, body := doJSON(t, app, http.MethodPost, "/chatwoot/sync", `{"device_id":"dev-hantu"}`)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "Failed to resolve device") {
+		t.Fatalf("pesan lama harus utuh di mode single-tenant: %s", body)
+	}
+
+	// Dan device mana pun tetap boleh disinkronkan seperti sebelumnya.
+	if res, body := doJSON(t, app, http.MethodPost, "/chatwoot/sync", `{"device_id":"dev-b"}`); res.StatusCode == http.StatusNotFound {
+		t.Fatalf("device lain tidak boleh ditolak di mode single-tenant: %d %s", res.StatusCode, body)
+	}
+}
