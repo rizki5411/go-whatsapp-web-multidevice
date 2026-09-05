@@ -1,6 +1,9 @@
 package error
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 type LoginError string
 
@@ -67,6 +70,40 @@ func (err sessionSavedError) StatusCode() int {
 	return http.StatusInternalServerError
 }
 
+// deviceIDTakenError menjawab pembuatan device dengan id pilihan sendiri yang
+// sudah dipakai.
+//
+// Lahir karena kegagalan ini SATU-SATUNYA alasan `POST /devices` menolak sebuah
+// id, dan sebelumnya ia jatuh ke `500 INTERNAL_SERVER_ERROR` lewat
+// `fmt.Errorf` — status yang berarti "backend rusak" untuk sesuatu yang
+// sepenuhnya bisa diperbaiki pemanggil dengan mengetik id lain. Klien tidak
+// punya cara membedakannya dari kerusakan sungguhan, jadi tidak ada UI yang
+// bisa menawarkan field id dengan jujur.
+type deviceIDTakenError string
+
+func (err deviceIDTakenError) Error() string {
+	return string(err)
+}
+
+// ErrCode will return the error code based on the error data type
+func (err deviceIDTakenError) ErrCode() string {
+	return "DEVICE_ID_TAKEN"
+}
+
+// StatusCode will return the HTTP status code based on the error data type
+func (err deviceIDTakenError) StatusCode() int {
+	return http.StatusConflict
+}
+
+// DeviceIDTaken membangun error untuk id device yang sudah dipakai.
+//
+// Fungsi, bukan variabel, karena pesannya harus menyebut id-nya: "device id
+// sudah dipakai" tanpa menyebut yang mana tidak menolong siapa pun yang sedang
+// membuat beberapa device sekaligus.
+func DeviceIDTaken(deviceID string) error {
+	return deviceIDTakenError(fmt.Sprintf("device id %q is already in use", deviceID))
+}
+
 type notFoundError string
 
 func (err notFoundError) Error() string {
@@ -89,6 +126,6 @@ var (
 	ErrNotLoggedIn     = AuthError("you are not logged in")
 	ErrReconnect       = AuthError("reconnect error")
 	ErrQrChannel       = qrChannelError("QR channel error")
-	ErrSessionSaved   = sessionSavedError("your session have been saved, please wait to connect 2 second and refresh again")
-	ErrDeviceNotFound = notFoundError("device not found")
+	ErrSessionSaved    = sessionSavedError("your session have been saved, please wait to connect 2 second and refresh again")
+	ErrDeviceNotFound  = notFoundError("device not found")
 )

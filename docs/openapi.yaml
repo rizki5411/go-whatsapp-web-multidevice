@@ -426,8 +426,20 @@ paths:
               properties:
                 device_id:
                   type: string
-                  description: Optional custom device ID. If not provided, one will be generated.
-                  example: 'my-custom-device-id'
+                  minLength: 3
+                  maxLength: 64
+                  pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$'
+                  description: >-
+                    Optional custom device ID. Leave it out (or send an empty
+                    string) and the server generates a UUID.
+
+
+                    The id goes into request paths (/devices/{device_id}/...)
+                    and into the X-Device-Id header, so it is restricted to
+                    letters, digits, dot, underscore and hyphen, and must start
+                    with a letter or digit. An id already in use is answered
+                    409 DEVICE_ID_TAKEN, not 500.
+                  example: 'cs-utama'
                 webhook_url:
                   type: string
                   description: Optional device-specific webhook URL. If set, events for this device will be sent here instead of the global webhook.
@@ -457,6 +469,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBadRequest'
+        '409':
+          description: The requested device_id is already in use (code DEVICE_ID_TAKEN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
         '500':
           description: Internal Server Error
           content:
@@ -4922,6 +4940,7 @@ components:
           example: '628123456789'
         display_name:
           type: string
+          description: WhatsApp push name. Filled in by pairing, overwritten on every re-pair.
           example: 'John Doe'
         state:
           type: string

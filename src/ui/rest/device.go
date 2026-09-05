@@ -2,6 +2,7 @@ package rest
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
@@ -10,6 +11,7 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/middleware"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/ui/rest/tenantfilter"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/validations"
 	"github.com/gofiber/fiber/v3"
 	"github.com/sirupsen/logrus"
 )
@@ -84,6 +86,10 @@ func (handler *Device) GetDevice(c fiber.Ctx) error {
 
 func (handler *Device) AddDevice(c fiber.Ctx) error {
 	var req struct {
+		// Id slot device pilihan pemanggil. KOSONG berarti "buatkan otomatis",
+		// dan backend membuat UUID-nya. Bentuknya dibatasi
+		// `validations.ValidateNewDeviceID` karena id ini masuk ke path URL dan
+		// ke nilai header X-Device-Id, bukan cuma ke satu kolom database.
 		DeviceID                  string `json:"device_id"`
 		WebhookURL                string `json:"webhook_url"`
 		WebhookSecret             string `json:"webhook_secret"`
@@ -98,6 +104,13 @@ func (handler *Device) AddDevice(c fiber.Ctx) error {
 			Message: "Invalid request body",
 			Results: nil,
 		})
+	}
+
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	if err := validations.ValidateNewDeviceID(c.Context(), req.DeviceID); err != nil {
+		// Diperiksa SEBELUM kuota dan sebelum device dibuat: penolakan bentuk id
+		// tidak boleh sampai memakan jatah kuota atau meninggalkan slot separuh.
+		utils.PanicIfNeeded(err)
 	}
 
 	var webhook *chatstorage.DeviceWebhookConfig

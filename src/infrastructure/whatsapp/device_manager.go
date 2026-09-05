@@ -13,6 +13,7 @@ import (
 	domainChatStorage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
 	domainDevice "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/device"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatwoot"
+	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	fiberUtils "github.com/gofiber/utils/v2"
 	"github.com/sirupsen/logrus"
 	"go.mau.fi/whatsmeow"
@@ -440,7 +441,10 @@ func (m *DeviceManager) CreateDevice(ctx context.Context, requestedID string) (*
 	defer m.mu.Unlock()
 
 	if _, exists := m.devices[id]; exists {
-		return nil, fmt.Errorf("device %s already exists", id)
+		// Bertipe khusus, bukan fmt.Errorf: pemanggil REST menerjemahkannya jadi
+		// 409 DEVICE_ID_TAKEN. Sebagai error biasa ia jatuh ke 500, dan sebuah
+		// id yang tinggal diketik ulang tidak boleh terbaca sebagai backend rusak.
+		return nil, pkgError.DeviceIDTaken(id)
 	}
 
 	instance := NewDeviceInstance(id, nil, newDeviceChatStorage(id, m.storage))

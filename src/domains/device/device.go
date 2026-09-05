@@ -14,6 +14,11 @@ const (
 )
 
 // Device describes a WhatsApp account/device tracked by the system.
+//
+// DisplayName datang dari push name WhatsApp dan terisi sendiri setelah
+// pairing; tidak ada endpoint yang menyetelnya. Nama yang diketik operator
+// pernah dicoba sebagai field terpisah (tabel device_label, migration 62) dan
+// DIBATALKAN: ia cuma menduplikasi nama yang sudah datang sendiri dengan benar.
 type Device struct {
 	ID          string      `json:"id"`
 	PhoneNumber string      `json:"phone_number,omitempty"`

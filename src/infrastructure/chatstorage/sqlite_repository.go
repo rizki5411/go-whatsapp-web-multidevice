@@ -1530,6 +1530,13 @@ func (r *SQLiteRepository) DeleteDeviceData(deviceID string) error {
 		return fmt.Errorf("failed to delete device forward sources: %w", err)
 	}
 
+	// device_label sudah tidak dipakai (lihat migration 62), tapi barisnya masih
+	// bisa ada di database yang sempat memakainya. Dibuang bersama device supaya
+	// tidak ada sisa yang menggantung tanpa pemilik.
+	if _, err := tx.Exec(`DELETE FROM device_label WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("failed to delete device label: %w", err)
+	}
+
 	if _, err := tx.Exec(`DELETE FROM message_edits WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("failed to delete device message edits: %w", err)
 	}
@@ -2952,5 +2959,21 @@ func (r *SQLiteRepository) getMigrations() []string {
 		`CREATE INDEX IF NOT EXISTS idx_user_session_user ON user_session(user_id)`,
 		// Migration 61: Sapu session kedaluwarsa secara berkala.
 		`CREATE INDEX IF NOT EXISTS idx_user_session_expires ON user_session(expires_at)`,
+		// Migration 62: PENINGGALAN — tabelnya dibuat tapi tidak ada lagi yang
+		// membacanya. Ia lahir untuk nama device yang diketik operator, fitur
+		// yang dibatalkan beberapa jam kemudian: nama sudah datang sendiri dari
+		// push name WhatsApp lewat devices.display_name, dan field manual di
+		// atasnya cuma menduplikasi sesuatu yang sudah benar.
+		//
+		// Entrinya SENGAJA tidak dihapus. Nomor migration adalah penghitung yang
+		// tersimpan di schema_info pada database yang sudah jalan; memendekkan
+		// daftar ini akan membuat migration berikutnya memakai nomor 62 lagi dan
+		// dilewati diam-diam pada database yang penghitungnya sudah 62.
+		`CREATE TABLE IF NOT EXISTS device_label (
+			device_id VARCHAR(255) PRIMARY KEY,
+			label VARCHAR(255) NOT NULL DEFAULT '',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 }
